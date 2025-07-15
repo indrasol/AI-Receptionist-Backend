@@ -63,13 +63,13 @@ def parse_cors_origins(cors_str):
 # Create settings instance with environment variables
 env_vars = load_env_file()
 settings = Settings(
-    app_name=env_vars.get('APP-NAME', 'AI Receptionist API'),
+    app_name=env_vars.get('APP_NAME', 'AI Receptionist API'),
     debug=env_vars.get('DEBUG', 'True').lower() == 'true',
-    api_v1_str=env_vars.get('API-V1-STR', '/api/v1'),
+    api_v1_str=env_vars.get('API_V1_STR', '/api/v1'),
     host=env_vars.get('HOST', '0.0.0.0'),
     port=int(env_vars.get('PORT', '8000')),
-    backend_cors_origins=parse_cors_origins(env_vars.get('BACKEND-CORS-ORIGINS')),
-    log_level=env_vars.get('LOG-LEVEL', 'INFO'),
-    supabase_url=env_vars.get('SUPABASE-URL', ''),
-    supabase_key=env_vars.get('SUPABASE-KEY', '')
+    backend_cors_origins=parse_cors_origins(env_vars.get('BACKEND_CORS_ORIGINS')),
+    log_level=env_vars.get('LOG_LEVEL', 'INFO'),
+    supabase_url=env_vars.get('SUPABASE_URL', ''),
+    supabase_key=env_vars.get('SUPABASE_KEY', '')
 ) 
