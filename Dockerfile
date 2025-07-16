@@ -15,9 +15,9 @@ RUN pip install --no-cache-dir -r app/requirements.txt
 # Copy the actual application code
 COPY app/ app/
 
-# Create a non-root user for security
+# Create non-root user
 RUN useradd --create-home --shell /bin/bash appuser \
-    && chown -R app:app /app
+    && chown -R appuser:appuser /src
 USER appuser
 
 # Add /src to PYTHONPATH so 'from app.config' works
