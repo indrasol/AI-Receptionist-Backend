@@ -23,6 +23,7 @@ app = FastAPI(
     docs_url=f"{settings.api_v1_str}/docs",
     redoc_url=f"{settings.api_v1_str}/redoc",
     debug=settings.debug
+    redirect_slashes=False
 )
 
 # Allow frontend origins
