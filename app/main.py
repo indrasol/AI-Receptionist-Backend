@@ -22,7 +22,7 @@ app = FastAPI(
     openapi_url=f"{settings.api_v1_str}/openapi.json",
     docs_url=f"{settings.api_v1_str}/docs",
     redoc_url=f"{settings.api_v1_str}/redoc",
-    debug=settings.debug
+    debug=settings.debug,
     redirect_slashes=False
 )
 
