@@ -60,16 +60,29 @@ def parse_cors_origins(cors_str):
     origins = [origin.strip().strip('"').strip("'") for origin in cors_str.split(',')]
     return [origin for origin in origins if origin]
 
-# Create settings instance with environment variables
-env_vars = load_env_file()
+# Helper to determine if running in Azure/production
+IS_AZURE = os.environ.get('AZURE_ENV', '').lower() == 'true'
+
+def get_env_var(key, default=None):
+    if IS_AZURE:
+        return os.environ.get(key, default)
+    else:
+        return env_vars.get(key, default)
+
+# Load .env only if not running in Azure
+if not IS_AZURE:
+    env_vars = load_env_file()
+else:
+    env_vars = {}
+
 settings = Settings(
-    app_name=env_vars.get('APP_NAME', 'AI Receptionist API'),
-    debug=env_vars.get('DEBUG', 'True').lower() == 'true',
-    api_v1_str=env_vars.get('API_V1_STR', '/api/v1'),
-    host=env_vars.get('HOST', '0.0.0.0'),
-    port=int(env_vars.get('PORT', '8000')),
-    backend_cors_origins=parse_cors_origins(env_vars.get('BACKEND_CORS_ORIGINS')),
-    log_level=env_vars.get('LOG_LEVEL', 'INFO'),
-    supabase_url=env_vars.get('SUPABASE_URL', ''),
-    supabase_key=env_vars.get('SUPABASE_KEY', '')
+    app_name=get_env_var('APP_NAME', 'AI Receptionist API'),
+    debug=get_env_var('DEBUG', 'True').lower() == 'true',
+    api_v1_str=get_env_var('API_V1_STR', '/api/v1'),
+    host=get_env_var('HOST', '0.0.0.0'),
+    port=int(get_env_var('PORT', '8000')),
+    backend_cors_origins=parse_cors_origins(get_env_var('BACKEND_CORS_ORIGINS')),
+    log_level=get_env_var('LOG_LEVEL', 'INFO'),
+    supabase_url=get_env_var('SUPABASE_URL', ''),
+    supabase_key=get_env_var('SUPABASE_KEY', '')
 ) 
