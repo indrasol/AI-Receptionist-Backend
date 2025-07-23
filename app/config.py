@@ -1,88 +1,20 @@
-from typing import List
 import os
-from pydantic import BaseModel, validator
+from pydantic import BaseModel
 
+# No .env or AZURE_ENV logic; use only os.getenv
 
 class Settings(BaseModel):
-    # FastAPI Configuration
-    app_name: str = "AI Receptionist API"
-    debug: bool = True
-    api_v1_str: str = "/api/v1"
-    
-    # Server Configuration
-    host: str = "0.0.0.0"
-    port: int = 8000
-    
-    # CORS Configuration
-    backend_cors_origins: List[str] = ["http://localhost:3000", "http://localhost:8080"]
-    
-    # Logging
-    log_level: str = "INFO"
-    
-    # Supabase Configuration
-    supabase_url: str = ""
-    supabase_key: str = ""
-    
-    @validator("backend_cors_origins", pre=True)
-    def assemble_cors_origins(cls, v):
-        if isinstance(v, str) and not v.startswith("["):
-            return [i.strip() for i in v.split(",")]
-        elif isinstance(v, (list, str)):
-            return v
-        raise ValueError(v)
+    app_name: str = os.getenv('APP_NAME', 'AI Receptionist API')
+    debug: bool = os.getenv('DEBUG', 'True').lower() == 'true'
+    api_v1_str: str = os.getenv('API_V1_STR', '/api/v1')
+    host: str = os.getenv('HOST', '0.0.0.0')
+    port: int = int(os.getenv('PORT', '8000'))
+    log_level: str = os.getenv('LOG_LEVEL', 'INFO')
+    supabase_url: str = os.getenv('SUPABASE_URL', '')
+    supabase_key: str = os.getenv('SUPABASE_KEY', '')
 
+settings = Settings()
 
-# Load environment variables
-def load_env_file():
-    env_vars = {}
-    try:
-        with open('.env', 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    key, value = line.split('=', 1)
-                    env_vars[key.strip()] = value.strip().strip('"').strip("'")
-    except FileNotFoundError:
-        pass
-    return env_vars
-
-def parse_cors_origins(cors_str):
-    """Parse CORS origins from string to list"""
-    if not cors_str:
-        return ["http://localhost:3000", "http://localhost:8080"]
-    
-    # Remove brackets and split by comma
-    cors_str = cors_str.strip('[]')
-    if not cors_str:
-        return ["http://localhost:3000", "http://localhost:8080"]
-    
-    # Split by comma and clean up each URL
-    origins = [origin.strip().strip('"').strip("'") for origin in cors_str.split(',')]
-    return [origin for origin in origins if origin]
-
-# Helper to determine if running in Azure/production
-IS_AZURE = os.environ.get('AZURE_ENV', '').lower() == 'true'
-
-def get_env_var(key, default=None):
-    if IS_AZURE:
-        return os.environ.get(key, default)
-    else:
-        return env_vars.get(key, default)
-
-# Load .env only if not running in Azure
-if not IS_AZURE:
-    env_vars = load_env_file()
-else:
-    env_vars = {}
-
-settings = Settings(
-    app_name=get_env_var('APP_NAME', 'AI Receptionist API'),
-    debug=get_env_var('DEBUG', 'True').lower() == 'true',
-    api_v1_str=get_env_var('API_V1_STR', '/api/v1'),
-    host=get_env_var('HOST', '0.0.0.0'),
-    port=int(get_env_var('PORT', '8000')),
-    backend_cors_origins=parse_cors_origins(get_env_var('BACKEND_CORS_ORIGINS')),
-    log_level=get_env_var('LOG_LEVEL', 'INFO'),
-    supabase_url=get_env_var('SUPABASE_URL', ''),
-    supabase_key=get_env_var('SUPABASE_KEY', '')
-) 
+# Debug print for troubleshooting
+print(f"DEBUG env: {os.getenv('DEBUG')}")
+print(f"settings.debug: {settings.debug}")
