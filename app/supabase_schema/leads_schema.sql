@@ -1,6 +1,6 @@
 -- Create leads table for development environment
 CREATE TABLE IF NOT EXISTS leads_dev (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     first_name TEXT NOT NULL,
     last_name TEXT NOT NULL,
     phone_number TEXT NOT NULL,
@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS leads_dev (
 
 -- Create leads table for production environment
 CREATE TABLE IF NOT EXISTS leads (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     first_name TEXT NOT NULL,
     last_name TEXT NOT NULL,
     phone_number TEXT NOT NULL,
