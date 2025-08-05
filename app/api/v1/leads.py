@@ -53,7 +53,7 @@ async def upload_leads_excel(file: UploadFile = File(...)):
         supabase = get_supabase_client()
         
         # Use your existing table name from configuration
-        table_name = settings.leads_table_name
+        table_name = "ai_receptionist_leads_dev" if settings.debug else "ai_receptionist_leads"
         
         # Debug: Print connection info
         print(f"🔍 Database Debug Info:")
@@ -139,7 +139,7 @@ async def create_leads_bulk(leads: LeadList):
     
     try:
         supabase = get_supabase_client()
-        table_name = settings.leads_table_name
+        table_name = "ai_receptionist_leads_dev" if settings.debug else "ai_receptionist_leads"
         
         for lead in leads.leads:
             leads_processed += 1
@@ -196,7 +196,7 @@ async def get_leads():
     """
     try:
         supabase = get_supabase_client()
-        table_name = settings.leads_table_name
+        table_name = "ai_receptionist_leads_dev" if settings.debug else "ai_receptionist_leads"
         
         result = supabase.table(table_name).select("*").order("created_at", desc=True).execute()
         
