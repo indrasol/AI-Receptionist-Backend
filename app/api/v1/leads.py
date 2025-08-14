@@ -675,7 +675,7 @@ async def call_leads(request: CallLeadsRequest, current_user: dict = Depends(get
                     "controlUrl": "https://phone-call-websocket.aws-us-west-2-backend-production3.vapi.ai/a4ea80a4-04e6-4ecd-b764-f9ee1320cd07/control"
                 },
                 "transport": {
-                    "callSid": "CAcac1044201c9b398684018f71c344d30",
+                    "callSid": "***",
                     "provider": "twilio",
                     "accountSid": "******"
                 }
