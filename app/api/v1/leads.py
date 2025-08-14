@@ -677,7 +677,7 @@ async def call_leads(request: CallLeadsRequest, current_user: dict = Depends(get
                 "transport": {
                     "callSid": "CAcac1044201c9b398684018f71c344d30",
                     "provider": "twilio",
-                    "accountSid": "AC89c1af3e3270ca2908bd64e818645281"
+                    "accountSid": "******"
                 }
             }
         }
