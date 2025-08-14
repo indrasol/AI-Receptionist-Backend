@@ -654,13 +654,13 @@ async def call_leads(request: CallLeadsRequest, current_user: dict = Depends(get
             "customer_name": "Kanoj g",
             "phone_number": "+19132956186",
             "vapi_response": {
-                "id": "a4ea80a4-04e6-4ecd-b764-f9ee1320cd07",
-                "assistantId": "99eff76a-af22-479e-bd46-7b1ea75806d9",
-                "phoneNumberId": "e3797b31-ce16-41f7-9099-2c6e3d703b62",
+                "id": "***",
+                "assistantId": "***",
+                "phoneNumberId": "***",
                 "type": "outboundPhoneCall",
                 "createdAt": "2025-08-14T19:54:48.706Z",
                 "updatedAt": "2025-08-14T19:54:48.706Z",
-                "orgId": "2fba517d-8030-49c5-9a8e-9cfbe7284d3e",
+                "orgId": "***",
                 "cost": 0,
                 "customer": {
                     "name": "Kanoj g",
@@ -668,11 +668,11 @@ async def call_leads(request: CallLeadsRequest, current_user: dict = Depends(get
                 },
                 "status": "queued",
                 "phoneCallProvider": "twilio",
-                "phoneCallProviderId": "CAcac1044201c9b398684018f71c344d30",
+                "phoneCallProviderId": "***",
                 "phoneCallTransport": "pstn",
                 "monitor": {
-                    "listenUrl": "wss://phone-call-websocket.aws-us-west-2-backend-production3.vapi.ai/a4ea80a4-04e6-4ecd-b764-f9ee1320cd07/listen",
-                    "controlUrl": "https://phone-call-websocket.aws-us-west-2-backend-production3.vapi.ai/a4ea80a4-04e6-4ecd-b764-f9ee1320cd07/control"
+                    "listenUrl": "wss://phone-call-websocket.aws-us-west-2-backend-production3.vapi.ai/***/listen",
+                    "controlUrl": "https://phone-call-websocket.aws-us-west-2-backend-production3.vapi.ai/***/control"
                 },
                 "transport": {
                     "callSid": "***",
