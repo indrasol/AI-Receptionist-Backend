@@ -1,6 +1,7 @@
 -- Create contacts table for development environment
+-- Using BIGSERIAL for simple sequential IDs (1, 2, 3...) - easier to work with
 CREATE TABLE IF NOT EXISTS ai_receptionist_reach_dev (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,  -- Sequential numbers (1, 2, 3...)
     name TEXT NOT NULL,
     email TEXT NOT NULL,
     company TEXT,
@@ -11,8 +12,9 @@ CREATE TABLE IF NOT EXISTS ai_receptionist_reach_dev (
 );
 
 -- Create contacts table for production environment
+-- Using BIGSERIAL for simple sequential IDs (1, 2, 3...) - easier to work with
 CREATE TABLE IF NOT EXISTS ai_receptionist_reach (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,  -- Sequential numbers (1, 2, 3...)
     name TEXT NOT NULL,
     email TEXT NOT NULL,
     company TEXT,
@@ -44,11 +46,14 @@ CREATE POLICY "Allow all operations on ai_receptionist_reach" ON ai_receptionist
 -- Add comments for documentation
 COMMENT ON TABLE ai_receptionist_reach_dev IS 'Contact form submissions from the AI Receptionist API (Development)';
 COMMENT ON TABLE ai_receptionist_reach IS 'Contact form submissions from the AI Receptionist API (Production)';
-COMMENT ON COLUMN ai_receptionist_reach_dev.id IS 'Unique identifier for the contact';
+COMMENT ON COLUMN ai_receptionist_reach_dev.id IS 'Sequential identifier for the contact (1, 2, 3...)';
 COMMENT ON COLUMN ai_receptionist_reach_dev.name IS 'Name of the person submitting the form';
 COMMENT ON COLUMN ai_receptionist_reach_dev.email IS 'Email address of the person';
 COMMENT ON COLUMN ai_receptionist_reach_dev.company IS 'Company name (optional)';
 COMMENT ON COLUMN ai_receptionist_reach_dev.subject IS 'Subject of the message (optional)';
 COMMENT ON COLUMN ai_receptionist_reach_dev.message IS 'Message content from the contact form (optional)';
 COMMENT ON COLUMN ai_receptionist_reach_dev.channel IS 'Array of channels through which the contact was submitted (e.g., ["teams"])';
-COMMENT ON COLUMN ai_receptionist_reach_dev.created_at IS 'Timestamp when the contact was submitted'; 
+COMMENT ON COLUMN ai_receptionist_reach_dev.created_at IS 'Timestamp when the contact was submitted';
+
+-- Add comment for production table ID as well
+COMMENT ON COLUMN ai_receptionist_reach.id IS 'Sequential identifier for the contact (1, 2, 3...)'; 

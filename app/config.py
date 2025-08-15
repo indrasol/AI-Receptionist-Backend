@@ -10,8 +10,8 @@ class Settings(BaseModel):
     host: str = os.getenv('HOST', '0.0.0.0')
     port: int = int(os.getenv('PORT', '8000'))
     log_level: str = os.getenv('LOG_LEVEL', 'INFO')
-    supabase_url: str = os.getenv('SUPABASE_URL', '')
-    supabase_key: str = os.getenv('SUPABASE_KEY', '')
+    supabase_url: str = os.getenv('AI_RECEPTION_SUPABASE_URL', '')
+    supabase_key: str = os.getenv('AI_RECEPTION_SUPABASE_KEY', '')
 
 settings = Settings()
 
