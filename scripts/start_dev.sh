@@ -25,9 +25,10 @@ if [ ! -f ".env" ]; then
     echo "   cp env.example .env"
     echo ""
     echo "Required environment variables:"
-    echo "  - SUPABASE_URL"
-    echo "  - SUPABASE_KEY"
-    echo "  - SUPABASE_SERVICE_ROLE_KEY"
+    echo "  - AI_RECEPTION_SUPABASE_URL"
+    echo "  - AI_RECEPTION_SUPABASE_KEY"
+    echo "  - AI_RECEPTION_SUPABASE_SERVICE_ROLE_KEY"
+    echo "  - AI_RECEPTION_SUPABASE_JWT_SECRET"
     echo "  - SECRET_KEY"
     echo ""
 fi
