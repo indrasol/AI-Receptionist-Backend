@@ -342,17 +342,14 @@ class AuthService:
                 detail="Authorization header is required"
             )
         
-        try:
-            # Extract token from "Bearer <token>" format
-            if not authorization.startswith("Bearer "):
-                raise HTTPException(
-                    status_code=401,
-                    detail="Invalid authorization scheme. Use 'Bearer <token>'"
-                )
-            token = authorization[7:]  # Remove "Bearer " prefix
-            return token
-        except Exception:
+        token = authorization[:]
+        if authorization.startswith("Bearer "):
+            token = authorization[7:]
+        
+        if not token:
             raise HTTPException(
                 status_code=401,
-                detail="Invalid authorization header format. Use 'Bearer <token>'"
-            ) 
+                detail="Token is missing from authorization header"
+            )
+            
+        return token 
