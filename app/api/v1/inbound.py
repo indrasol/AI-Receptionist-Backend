@@ -132,7 +132,7 @@ async def get_inbound_calls(current_user: dict = Depends(get_current_user)):
         )
 
 
-@router.get("/get_call", response_model=Dict[str, Any])
+@router.post("/get_call", response_model=Dict[str, Any])
 async def get_inbound_call_by_id(request: Dict[str, Any], current_user: dict = Depends(get_current_user)):
     """
     Get a specific inbound call by ID for the current user's organization
