@@ -12,6 +12,10 @@ class Settings(BaseModel):
     log_level: str = os.getenv('LOG_LEVEL', 'INFO')
     supabase_url: str = os.getenv('AI_RECEPTION_SUPABASE_URL', '')
     supabase_key: str = os.getenv('AI_RECEPTION_SUPABASE_KEY', '')
+    supabase_service_role_key: str = os.getenv('AI_RECEPTION_SUPABASE_SERVICE_ROLE_KEY', '')
+    supabase_jwt_secret: str = os.getenv('AI_RECEPTION_SUPABASE_JWT_SECRET', '')
+    vapi_webhook_secret: str = os.getenv('AI_RECEPTION_VAPI_WEBHOOK_SECRET', 'test-secret-12345')
+    vapi_auth_token: str = os.getenv('AI_RECEPTION_VAPI_AUTH_TOKEN', '')
 
 settings = Settings()
 
