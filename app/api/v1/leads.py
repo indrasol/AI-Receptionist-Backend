@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends, Header
 from app.schemas.lead import Lead, LeadResponse, LeadList, LeadDB, GoogleSheetsResponse, LeadIdRequest, CallLeadResponse, CallLeadsRequest, CallLeadsResponse, VapiVoicesResponse, VapiVoiceIdResponse, VapiBackendVoiceResponse
 from app.utils.auth import get_current_user
 import logging
@@ -10,10 +10,10 @@ import os
 from datetime import datetime
 from app.database import get_supabase_client
 from app.config import settings
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
 
 logger = logging.getLogger(__name__)
-router = APIRouter(tags=["Leads Management"])
+router = APIRouter(tags=["Outbound Management"])
 
 
 async def insert_leads_to_database(valid_rows: List[dict], source: str, source_info: str = None, current_user: dict = None) -> List[dict]:
@@ -1486,4 +1486,181 @@ async def update_lead_with_vapi_data(lead_id: int, vapi_data: dict, table_name: 
             
     except Exception as e:
         logger.error(f"Failed to update lead {lead_id} with VAPI call data: {str(e)}")
-        raise 
+        raise
+
+
+@router.post("/vapi/webhook")
+async def vapi_webhook(
+    request: dict,
+    x_webhook_secret: str = Header(..., alias="X-Webhook-Secret")
+):
+    """
+    VAPI webhook endpoint to handle call events
+    
+    **Security**: Include `X-Webhook-Secret` header with your webhook secret key
+    
+    **Webhook Events:**
+    - call-started: Call begins
+    - speech-update: User speech detected
+    - function-call: Function execution requested
+    - call-ended: Call completes
+    
+    **Returns:**
+    - 200: Webhook processed successfully
+    - 401: Invalid webhook secret
+    - 400: Invalid webhook data
+    - 500: Processing error
+    """
+    try:
+        # Validate webhook secret
+        expected_secret = settings.vapi_webhook_secret
+        if not expected_secret:
+            logger.error("AI_RECEPTION_VAPI_WEBHOOK_SECRET environment variable not set")
+            raise HTTPException(status_code=500, detail="Webhook secret not configured")
+        
+        if x_webhook_secret != expected_secret:
+            logger.warning(f"Invalid webhook secret received: {x_webhook_secret[:10]}...")
+            raise HTTPException(status_code=401, detail="Invalid webhook secret")
+        
+        # Extract webhook data
+        message_data = request.get("message", {})
+        webhook_type = message_data.get("type")
+        timestamp = message_data.get("timestamp")
+        call_data = message_data.get("call", {})
+        
+        logger.info(f"VAPI webhook received: {webhook_type} at {timestamp}")
+        
+        # Only process end-of-call-report webhooks
+        if webhook_type == "end-of-call-report":
+            # Extract call details from the message structure
+            
+            # Get call ID from the call object
+            call_id = call_data.get("id")
+            call_type = call_data.get("type")
+            
+            # Get recording URL (from message level)
+            recording_url = message_data.get("recordingUrl", "No recording URL")
+            
+            # Get summary (from message.analysis)
+            summary = message_data.get("analysis", {}).get("summary", "No summary available")
+            
+            # Get transcript (from message level)
+            transcript = message_data.get("transcript", "No transcript available")
+            
+            # Get success evaluation (from message.analysis)
+            success_eval = message_data.get("analysis", {}).get("successEvaluation", "No evaluation")
+            
+            # Get call duration (from message level)
+            duration_seconds = message_data.get("durationSeconds", "Unknown")
+            
+            # Get additional useful information
+            ended_reason = message_data.get("endedReason", "Unknown")
+            cost = message_data.get("cost", "Unknown")
+            customer_number = call_data.get("customer", {}).get("number", "Unknown")
+            phone_number = request.get("phoneNumber", {}).get("number", "Unknown")
+            
+            # Print to console
+            print("🎯 VAPI END-OF-CALL REPORT RECEIVED")
+            print("=" * 60)
+            print(f"📞 Call ID: {call_id}")
+            print(f"📱 Customer Number: {customer_number}")
+            print(f"📞 Phone Number: {phone_number}")
+            print(f"🎵 Recording URL: {recording_url}")
+            print(f"📝 Summary: {summary}")
+            print(f"📊 Success Evaluation: {success_eval}")
+            print(f"⏱️  Duration: {duration_seconds} seconds")
+            print(f"💸 Cost: ${cost}")
+            print(f"🔚 Ended Reason: {ended_reason}")
+            print(f"📄 Transcript: {transcript[:200]}..." if len(transcript) > 200 else f"📄 Transcript: {transcript}")
+            print("=" * 60)
+            
+            # Log to logger as well
+            logger.info(f"End-of-call report received for call {call_id}")
+            logger.info(f"Customer Number: {customer_number}")
+            logger.info(f"Phone Number: {phone_number}")
+            logger.info(f"Recording URL: {recording_url}")
+            logger.info(f"Summary: {summary}")
+            logger.info(f"Success Evaluation: {success_eval}")
+            logger.info(f"Duration: {duration_seconds} seconds")
+            logger.info(f"Cost: ${cost}")
+            logger.info(f"Ended Reason: {ended_reason}")
+            
+            # Prepare call data for database
+            call_data_for_db = {
+                "vapi_call_id": call_id,
+                "call_status": "ended",
+                "call_summary": summary,
+                "call_recording_url": recording_url,
+                "call_transcript": transcript,
+                "success_evaluation": success_eval,
+                "call_type": call_type,
+                "call_duration_seconds": duration_seconds,
+                "call_cost": cost,
+                "ended_reason": ended_reason,
+                "customer_number": customer_number,
+                "phone_number_id": phone_number
+            }
+            
+            # Import database operations
+            from app.database_operations import save_inbound_call_data, update_outbound_call_data, get_organization_by_vapi_org_id
+            
+            try:
+                # Get organization ID from VAPI org ID in the webhook payload
+                vapi_org_id = call_data.get("orgId")
+                if not vapi_org_id:
+                    logger.error("No VAPI org ID found in webhook payload")
+                    raise HTTPException(status_code=400, detail="VAPI org ID is required in webhook payload")
+                
+                organization = await get_organization_by_vapi_org_id(vapi_org_id)
+                if not organization:
+                    logger.error(f"Organization not found for VAPI org ID: {vapi_org_id}")
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Organization not configured for VAPI org ID: {vapi_org_id}. Please configure this organization in the database."
+                    )
+                
+                organization_id = organization["id"]
+                logger.info(f"Found organization: {organization['name']} for VAPI org ID: {vapi_org_id}")
+                
+                # Save call data based on call type
+                if call_type == "inboundPhoneCall":
+                    # Save to inbound calls table
+                    saved_call = await save_inbound_call_data(call_data_for_db, organization_id)
+                    if saved_call:
+                        logger.info(f"Successfully saved inbound call data for call ID: {call_id}")
+                        print(f"💾 Saved inbound call data to database")
+                    else:
+                        logger.warning(f"Failed to save inbound call data for call ID: {call_id}")
+                        
+                elif call_type == "outboundPhoneCall":
+                    # Update existing lead in leads table
+                    updated_lead = await update_outbound_call_data(call_data_for_db, organization_id)
+                    if updated_lead:
+                        logger.info(f"Successfully updated outbound call data for call ID: {call_id}")
+                        print(f"💾 Updated outbound call data in leads table")
+                    else:
+                        logger.warning(f"Failed to update outbound call data for call ID: {call_id}")
+                        
+                else:
+                    logger.warning(f"Unknown call type: {call_type}")
+                    print(f"⚠️  Unknown call type: {call_type}")
+                    
+            except Exception as e:
+                logger.error(f"Error saving call data to database: {str(e)}")
+                print(f"❌ Error saving call data: {str(e)}")
+                # Don't raise exception - webhook should still succeed
+            
+        else:
+            logger.warning(f"Unsupported webhook type: {webhook_type}. Only 'end-of-call-report' is supported.")
+            return {"status": "unsupported_type", "message": f"Only 'end-of-call-report' webhooks are supported. Received: {webhook_type}"}
+        
+        return {"status": "success", "message": f"Webhook {webhook_type} processed successfully"}
+        
+    except Exception as e:
+        logger.error(f"Error processing VAPI webhook: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process webhook: {str(e)}"
+        )
+
+

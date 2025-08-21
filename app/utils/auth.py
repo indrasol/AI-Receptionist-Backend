@@ -32,8 +32,32 @@ async def get_current_user(authorization: str = Depends(http_bearer)):
         # Verify the token
         auth_service = AuthService()
         user = await auth_service.verify_token(token)
-
         logger.info(f"User authenticated: {user.get('claims').get('email', 'unknown')}")
+
+        # Get user's organization information
+        try:
+            from app.database_operations import get_user_organization, ensure_user_organization
+            
+            # Get user's organization from metadata (pass claims for efficiency)
+            user_org = await get_user_organization(user.get('claims').get('sub'), user.get('claims'))
+            
+            if not user_org:
+                # Ensure user has CSA organization
+                org_id = await ensure_user_organization(user.get('claims').get('sub'))
+                if org_id:
+                    # Try again with updated metadata
+                    user_org = await get_user_organization(user.get('claims').get('sub'), user.get('claims'))
+            
+            # Add organization info to user claims
+            if user_org:
+                user['claims']['organization'] = user_org
+                logger.info(f"User {user.get('claims').get('email')} belongs to organization: {user_org.get('name')}")
+            else:
+                logger.warning(f"Could not determine organization for user {user.get('claims').get('email')}")
+                
+        except Exception as org_error:
+            logger.error(f"Error getting user organization: {str(org_error)}")
+            # Don't fail authentication if organization lookup fails
 
         return user.get('claims')
         
