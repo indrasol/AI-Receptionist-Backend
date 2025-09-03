@@ -1,0 +1,41 @@
+name: Capture Supabase Studio changes (dev)
+
+on:
+  push:
+    branches: [development]
+    paths-ignore:
+      - 'supabase/migrations/**'
+  workflow_dispatch:
+  schedule:
+    - cron: '0 * * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  db-diff-and-commit:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      POSTGRES_URL_POOLING_DEV: ${{ secrets.POSTGRES_URL_POOLING_DEV }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: development }
+
+      - uses: supabase/setup-cli@v1
+        with: { version: latest }
+
+      - name: Generate migration from dev DB (if any)
+        run: |
+          mkdir -p supabase/migrations
+          ts=$(date -u +%Y%m%d%H%M%S)
+          supabase db diff \
+            --db-url "$POSTGRES_URL_POOLING_DEV" \
+            --schema public \
+            -f "from-dev-${ts}" || echo "No diff"
+
+      - name: Commit migration if created
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(db): capture Studio changes from dev [skip ci]"
+          file_pattern: supabase/migrations/*.sql
