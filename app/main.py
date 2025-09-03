@@ -4,25 +4,26 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 import time
 import logging
-from app.config import settings
+# from app.config import settings
 from app.api.v1.router import api_router
+from app.config.settings import title, description, version, API_V1_STR, HOST, PORT, DEBUG, LOG_LEVEL
 
 # Configure logging
 logging.basicConfig(
-    level=getattr(logging, settings.log_level),
+    level=getattr(logging, LOG_LEVEL),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
 # Create FastAPI app
 app = FastAPI(
-    title=settings.app_name,
-    description="AI Receptionist API with FastAPI and Supabase",
-    version="1.0.0",
-    openapi_url=f"{settings.api_v1_str}/openapi.json",
-    docs_url=f"{settings.api_v1_str}/docs",
-    redoc_url=f"{settings.api_v1_str}/redoc",
-    debug=settings.debug,
+    title=title,
+    description=description,
+    version=version,
+    openapi_url=f"{API_V1_STR}/openapi.json",
+    docs_url=f"{API_V1_STR}/docs",
+    redoc_url=f"{API_V1_STR}/redoc",
+    debug=DEBUG,
     redirect_slashes=False
 )
 
@@ -89,8 +90,8 @@ async def root():
     """Root endpoint"""
     return {
         "message": "AI Receptionist API",
-        "version": "1.0.0",
-        "docs": f"{settings.api_v1_str}/docs"
+        "version": version,
+        "docs": f"{API_V1_STR}/docs"
     }
 
 
@@ -101,14 +102,14 @@ async def health_check():
 
 
 # Include API router
-app.include_router(api_router, prefix=settings.api_v1_str)
+app.include_router(api_router, prefix=API_V1_STR)
 
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
         "app.main:app",
-        host=settings.host,
-        port=settings.port,
-        reload=settings.debug
+        host=HOST,
+        port=PORT,
+        reload=DEBUG
     ) 
