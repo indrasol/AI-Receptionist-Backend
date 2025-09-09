@@ -3,7 +3,7 @@ from app.schemas.contact import ContactForm, ContactResponse
 import logging
 import httpx
 from app.database import get_supabase_client
-from app.config import settings
+from app.config.settings import DEBUG
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ async def contact_handler(form: ContactForm):
     # Send Teams notification
     try:
         # Determine webhook URL based on environment
-        if settings.debug:
+        if DEBUG:
             webhook_url = "https://webhookbot.c-toss.com/api/bot/webhooks/e0f4c984-7840-45d7-bb76-743a77220cfe"
         else:
             webhook_url = "https://webhookbot.c-toss.com/api/bot/webhooks/54e17e63-63b3-488b-96c4-5a155f9152f5"
@@ -74,7 +74,7 @@ async def contact_handler(form: ContactForm):
         supabase = get_supabase_client()
         
         # Determine table name based on environment
-        table_name = "ai_receptionist_reach_dev" if settings.debug else "ai_receptionist_reach"
+        table_name = "ai_receptionist_reach"
         
         data = {
             "name": form.name,

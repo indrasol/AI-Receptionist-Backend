@@ -4,7 +4,7 @@ import jwt
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from fastapi import HTTPException
-from app.config import settings
+from app.config.settings import SUPABASE_JWT_SECRET
 from app.schemas.auth import UserSignupRequest, UserSigninRequest, UserResponse, AuthResponse
 import logging
 
@@ -48,6 +48,9 @@ class AuthService:
             if existing_email:
                 raise ValueError(f"Email '{user_data.email}' already exists")
             
+            # Get default organization ID (CSA)
+            default_org_id = await self._get_default_organization_id()
+            
             # Create user in Supabase
             response = requests.post(
                 f"{self.auth_url}/admin/users",
@@ -59,7 +62,9 @@ class AuthService:
                     "user_metadata": {
                         "username": user_data.username,
                         "first_name": user_data.first_name,
-                        "last_name": user_data.last_name
+                        "last_name": user_data.last_name,
+                        "organization_id": default_org_id,
+                        "organization_name": "CSA"
                     }
                 }
             )
@@ -353,3 +358,22 @@ class AuthService:
             )
             
         return token 
+    
+    async def _get_default_organization_id(self) -> str:
+        """Get the default organization ID (CSA)"""
+        try:
+            # Import here to avoid circular imports
+            from app.database_operations import get_supabase_client
+            
+            supabase = get_supabase_client()
+            org_result = supabase.table("organizations").select("id").eq("name", "CSA").execute()
+            
+            if not org_result.data:
+                logger.error("CSA organization not found in database")
+                raise ValueError("Default organization not found")
+            
+            return org_result.data[0]["id"]
+            
+        except Exception as e:
+            logger.error(f"Failed to get default organization ID: {str(e)}")
+            raise ValueError("Failed to get default organization")

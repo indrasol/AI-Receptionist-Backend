@@ -9,7 +9,8 @@ from app.database_operations import get_inbound_calls_by_user_organization
 from typing import List, Dict, Any
 import logging
 import requests
-from app.config import settings
+from app.config.settings import DEBUG,VAPI_AUTH_TOKEN
+
 from app.database import get_supabase_client
 
 logger = logging.getLogger(__name__)
@@ -256,7 +257,7 @@ async def sync_vapi_calls(current_user: dict = Depends(get_current_user)):
             )
         
         # Call VAPI API to get latest calls
-        vapi_token = getattr(settings, 'vapi_auth_token', None)
+        vapi_token = VAPI_AUTH_TOKEN
         if not vapi_token:
             logger.error("VAPI auth token not configured")
             raise HTTPException(
@@ -397,18 +398,13 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
         # Get Supabase client
         supabase = get_supabase_client()
         
-        # Determine which views to use based on debug mode
-        if settings.debug:
-            dashboard_view = "ai_receptionist_dashboard_dev_view"
-            trends_view = "ai_receptionist_daily_trends_dev_view"
-            logger.info("Using development dashboard views")
-        else:
-            dashboard_view = "ai_receptionist_dashboard_view"
-            trends_view = "ai_receptionist_daily_trends_view"
-            logger.info("Using production dashboard views")
+        # Use production dashboard views
+        dashboard_view = "ai_receptionist_dashboard_view"
+        trends_view = "ai_receptionist_daily_trends_view"
+        logger.info("Using dashboard views")
         
-        # Get main dashboard stats
-        dashboard_result = supabase.table(dashboard_view).select("*").execute()
+        # Get main dashboard stats filtered by organization
+        dashboard_result = supabase.table(dashboard_view).select("*").eq("organization_id", organization_id).execute()
         
         if not dashboard_result.data:
             logger.warning(f"No dashboard data found for organization {organization_id}")
@@ -436,8 +432,8 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
         
         dashboard_data = dashboard_result.data[0]
         
-        # Get daily trends for charts
-        trends_result = supabase.table(trends_view).select("*").order("date").execute()
+        # Get daily trends for charts filtered by organization
+        trends_result = supabase.table(trends_view).select("*").eq("organization_id", organization_id).order("date").execute()
         trends_data = trends_result.data if trends_result.data else []
         
         # Format the response
@@ -467,7 +463,7 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
                 "current_date": dashboard_data.get("current_date"),
                 "yesterday_date": dashboard_data.get("yesterday_date"),
                 "fourteen_days_ago_date": dashboard_data.get("fourteen_days_ago_date"),
-                "environment": "development" if settings.debug else "production"
+                "environment": "development" if DEBUG else "production"
             }
         }
         

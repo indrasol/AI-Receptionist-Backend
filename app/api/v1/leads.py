@@ -9,7 +9,7 @@ import re
 import os
 from datetime import datetime
 from app.database import get_supabase_client
-from app.config import settings
+from app.config.settings import VAPI_WEBHOOK_SECRET
 from typing import List, Tuple, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ async def insert_leads_to_database(valid_rows: List[dict], source: str, source_i
     """
     try:
         supabase = get_supabase_client()
-        table_name = "ai_receptionist_leads_dev" if settings.debug else "ai_receptionist_leads"
+        table_name = "ai_receptionist_leads"
         
         # Prepare data for insertion (map to database column names)
         db_rows = []
@@ -67,6 +67,10 @@ async def insert_leads_to_database(valid_rows: List[dict], source: str, source_i
             if current_user:
                 db_row["created_by_user_id"] = current_user.get("sub")
                 db_row["created_by_user_email"] = current_user.get("email")
+                # Add organization_id from user's organization
+                user_organization = current_user.get("organization", {})
+                if user_organization.get("id"):
+                    db_row["organization_id"] = user_organization.get("id")
             
             db_rows.append(db_row)
         
@@ -441,16 +445,26 @@ async def get_leads(current_user: dict = Depends(get_current_user)):
     """
     try:
         supabase = get_supabase_client()
-        table_name = "ai_receptionist_leads_dev" if settings.debug else "ai_receptionist_leads"
+        table_name = "ai_receptionist_leads"
         
-        # Get current user's ID
-        current_user_id = current_user.get("sub")
-        print(f"Current user ID: {current_user_id}")
-        # Filter leads by the current user's ID
-        result = supabase.table(table_name).select("*").eq("created_by_user_id", current_user_id).order("created_at", desc=True).execute()
+        # Get current user's organization
+        user_organization = current_user.get("organization", {})
+        organization_id = user_organization.get("id")
+        
+        if not organization_id:
+            logger.error(f"User {current_user.get('email', 'unknown')} has no organization configured")
+            raise HTTPException(
+                status_code=400,
+                detail="User organization not configured. Please contact administrator."
+            )
+        
+        logger.info(f"Fetching leads for organization: {user_organization.get('name', 'Unknown')}")
+        # Filter leads by the user's organization
+        result = supabase.table(table_name).select("*").eq("organization_id", organization_id).order("created_at", desc=True).execute()
         
         # Check and update leads with missing VAPI call data
         updated_leads = []
+        print(f"Result: {result.data}")
         for lead in result.data:
             vapi_call_id = lead.get("vapi_call_id")
             if (vapi_call_id and 
@@ -546,24 +560,33 @@ async def get_summary_by_lead_id(request: LeadIdRequest, current_user: dict = De
     """
     try:
         supabase = get_supabase_client()
-        table_name = "ai_receptionist_leads_dev" if settings.debug else "ai_receptionist_leads"
+        table_name = "ai_receptionist_leads"
         
-        # Get current user's ID
-        current_user_id = current_user.get("sub")
+        # Get current user's organization
+        user_organization = current_user.get("organization", {})
+        organization_id = user_organization.get("id")
+        
+        if not organization_id:
+            logger.error(f"User {current_user.get('email', 'unknown')} has no organization configured")
+            raise HTTPException(
+                status_code=400,
+                detail="User organization not configured. Please contact administrator."
+            )
+        
         lead_id = request.lead_id
         print(f"User {current_user.get('email', 'unknown')} requesting lead ID: {lead_id}")
         
-        # Get the lead by ID and verify ownership
-        result = supabase.table(table_name).select("*").eq("id", lead_id).eq("created_by_user_id", current_user_id).execute()
+        # Get the lead by ID and verify it belongs to user's organization
+        result = supabase.table(table_name).select("*").eq("id", lead_id).eq("organization_id", organization_id).execute()
         
         if not result.data:
             # Check if lead exists but belongs to another user
             check_lead = supabase.table(table_name).select("id").eq("id", lead_id).execute()
             if check_lead.data:
-                logger.warning(f"User {current_user.get('email', 'unknown')} attempted to access lead {lead_id} owned by another user")
+                logger.warning(f"User {current_user.get('email', 'unknown')} attempted to access lead {lead_id} from another organization")
                 raise HTTPException(
                     status_code=403, 
-                    detail="Access denied. This lead belongs to another user."
+                    detail="Access denied. This lead belongs to another organization."
                 )
             else:
                 logger.warning(f"User {current_user.get('email', 'unknown')} requested non-existent lead ID: {lead_id}")
@@ -686,10 +709,19 @@ async def call_leads(request: CallLeadsRequest, current_user: dict = Depends(get
     """
     try:
         supabase = get_supabase_client()
-        table_name = "ai_receptionist_leads_dev" if settings.debug else "ai_receptionist_leads"
+        table_name = "ai_receptionist_leads"
         
-        # Get current user's ID
-        current_user_id = current_user.get("sub")
+        # Get current user's organization
+        user_organization = current_user.get("organization", {})
+        organization_id = user_organization.get("id")
+        
+        if not organization_id:
+            logger.error(f"User {current_user.get('email', 'unknown')} has no organization configured")
+            raise HTTPException(
+                status_code=400,
+                detail="User organization not configured. Please contact administrator."
+            )
+        
         lead_ids = request.lead_ids
         
         if not lead_ids:
@@ -700,8 +732,8 @@ async def call_leads(request: CallLeadsRequest, current_user: dict = Depends(get
         
         print(f"User {current_user.get('email', 'unknown')} initiating calls for {len(lead_ids)} leads")
         
-        # Get all leads by IDs and verify ownership
-        result = supabase.table(table_name).select("*").in_("id", lead_ids).eq("created_by_user_id", current_user_id).execute()
+        # Get all leads by IDs and verify they belong to user's organization
+        result = supabase.table(table_name).select("*").in_("id", lead_ids).eq("organization_id", organization_id).execute()
         
         if not result.data:
             raise HTTPException(
@@ -716,7 +748,7 @@ async def call_leads(request: CallLeadsRequest, current_user: dict = Depends(get
         missing_ids = requested_ids - found_ids
         
         if missing_ids:
-            logger.warning(f"User {current_user.get('email', 'unknown')} attempted to call leads {missing_ids} that don't belong to them")
+            logger.warning(f"User {current_user.get('email', 'unknown')} attempted to call leads {missing_ids} that don't belong to their organization")
         
         # Initialize results tracking
         results = []
@@ -1446,7 +1478,7 @@ async def update_vapi_assistant_voice(voiceId: str) -> bool:
         raise HTTPException(status_code=500, detail=f"Failed to update VAPI assistant voice: {str(e)}")
 
 
-async def update_lead_with_vapi_data(lead_id: int, vapi_data: dict, table_name: str, supabase):
+async def update_lead_with_vapi_data(lead_id: str, vapi_data: dict, table_name: str, supabase):
     """
     Update a lead with VAPI call data
     
@@ -1513,7 +1545,7 @@ async def vapi_webhook(
     """
     try:
         # Validate webhook secret
-        expected_secret = settings.vapi_webhook_secret
+        expected_secret = VAPI_WEBHOOK_SECRET
         if not expected_secret:
             logger.error("AI_RECEPTION_VAPI_WEBHOOK_SECRET environment variable not set")
             raise HTTPException(status_code=500, detail="Webhook secret not configured")

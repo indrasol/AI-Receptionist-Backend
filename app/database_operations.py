@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
 from app.database import get_supabase_client
-from app.config import settings
+from app.config.settings import SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_JWT_SECRET
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ async def save_inbound_call_data(call_data: Dict[str, Any], organization_id: str
     """
     try:
         supabase = get_supabase_client()
-        table_name = "ai_receptionist_inbound_calls_dev" if settings.debug else "ai_receptionist_inbound_calls"
+        table_name = "ai_receptionist_inbound_calls"
         
         # Extract data from call_data
         inbound_call_record = {
@@ -71,7 +71,7 @@ async def update_outbound_call_data(call_data: Dict[str, Any], organization_id: 
     """
     try:
         supabase = get_supabase_client()
-        table_name = "ai_receptionist_leads_dev" if settings.debug else "ai_receptionist_leads"
+        table_name = "ai_receptionist_leads"
         
         # Extract data from call_data
         update_data = {
@@ -170,17 +170,17 @@ async def get_calls_by_organization(organization_id: str, call_type: str = None)
         
         if call_type == "inbound":
             # Get inbound calls
-            table_name = "ai_receptionist_inbound_calls_dev" if settings.debug else "ai_receptionist_inbound_calls"
+            table_name = "ai_receptionist_inbound_calls"
             result = supabase.table(table_name).select("*").eq("organization_id", organization_id).order("created_at", desc=True).execute()
         elif call_type == "outbound":
             # Get outbound calls (leads)
-            table_name = "ai_receptionist_leads_dev" if settings.debug else "ai_receptionist_leads"
+            table_name = "ai_receptionist_leads"
             result = supabase.table(table_name).select("*").eq("organization_id", organization_id).order("created_at", desc=True).execute()
         else:
             # Get all calls
-            inbound_table_name = "ai_receptionist_inbound_calls_dev" if settings.debug else "ai_receptionist_inbound_calls"
+            inbound_table_name = "ai_receptionist_inbound_calls"
             inbound_result = supabase.table(inbound_table_name).select("*").eq("organization_id", organization_id).execute()
-            outbound_result = supabase.table("ai_receptionist_leads_dev" if settings.debug else "ai_receptionist_leads").select("*").eq("organization_id", organization_id).execute()
+            outbound_result = supabase.table("ai_receptionist_leads").select("*").eq("organization_id", organization_id).execute()
             
             # Combine and sort by created_at
             all_calls = []
@@ -289,7 +289,7 @@ async def get_user_organization(user_id: str, user_claims: dict = None) -> Optio
                 return org_from_claims
         
         # If no claims or no organization in claims, try admin lookup
-        if settings.supabase_service_role_key:
+        if SUPABASE_SERVICE_ROLE_KEY:
             try:
                 from app.database import get_supabase_admin_client
                 supabase_admin = get_supabase_admin_client()
@@ -375,7 +375,7 @@ async def get_inbound_calls_by_user_organization(user_id: str, user_claims: dict
         
         # Get inbound calls for that organization
         supabase = get_supabase_client()
-        table_name = "ai_receptionist_inbound_calls_dev" if settings.debug else "ai_receptionist_inbound_calls"
+        table_name = "ai_receptionist_inbound_calls"
         
         result = supabase.table(table_name).select("*").eq("organization_id", organization_id).order("created_at", desc=True).execute()
         
@@ -399,7 +399,7 @@ async def get_inbound_call_by_id_and_org(call_id: str, organization_id: str) -> 
     """
     try:
         supabase = get_supabase_client()
-        table_name = "ai_receptionist_inbound_calls_dev" if settings.debug else "ai_receptionist_inbound_calls"
+        table_name = "ai_receptionist_inbound_calls"
         
         # Get the specific call and verify organization ownership
         result = supabase.table(table_name).select("*").eq("id", call_id).eq("organization_id", organization_id).execute()
@@ -437,7 +437,7 @@ async def ensure_user_organization(user_id: str) -> str:
         organization_id = org_result.data[0]["id"]
         
         # Try to update user metadata if service role key is available
-        if settings.supabase_service_role_key:
+        if SUPABASE_SERVICE_ROLE_KEY:
             try:
                 from app.database import get_supabase_admin_client
                 supabase_admin = get_supabase_admin_client()
