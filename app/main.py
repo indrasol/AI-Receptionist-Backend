@@ -4,9 +4,8 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 import time
 import logging
-# from app.config import settings
+from app.config.settings import LOG_LEVEL, title, description, version, API_V1_STR, DEBUG, HOST, PORT, SUPABASE_URL, SUPABASE_KEY, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_JWT_SECRET, VAPI_WEBHOOK_SECRET, VAPI_AUTH_TOKEN
 from app.api.v1.router import api_router
-from app.config.settings import title, description, version, API_V1_STR, HOST, PORT, DEBUG, LOG_LEVEL
 
 # Configure logging
 logging.basicConfig(

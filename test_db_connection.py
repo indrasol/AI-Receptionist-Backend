@@ -19,7 +19,7 @@ def test_db_connection():
     # Get environment variables from settings
     supabase_url = settings.supabase_url
     supabase_key = settings.SUPABASE_KEY
-    table_name = "ai_receptionist_leads_dev" if settings.debug else "ai_receptionist_leads"
+    table_name = "ai_receptionist_leads"
 
     print(f"Supabase URL: {supabase_url}")
     print(f"Supabase Key: {'*' * 20 if supabase_key else 'NOT SET'}")

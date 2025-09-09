@@ -5,7 +5,7 @@ from datetime import datetime
 
 class Lead(BaseModel):
     """Individual lead schema for simple Excel format"""
-    id: Optional[int] = None
+    id: Optional[str] = None
     first_name: str
     last_name: str
     phone_number: str
@@ -26,10 +26,10 @@ class LeadList(BaseModel):
 
 
 class LeadDB(BaseModel):
-    """Schema for lead response from database - matches ai_receptionist_leads_dev table structure"""
+    """Schema for lead response from database - matches ai_receptionist_leads table structure"""
     
     # Core lead information
-    id: Optional[int] = None
+    id: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     phone_number: Optional[str] = None
@@ -70,19 +70,19 @@ class GoogleSheetsResponse(BaseModel):
 
 class LeadIdRequest(BaseModel):
     """Request schema for getting a lead by ID"""
-    lead_id: int
+    lead_id: str
 
 
 class CallLeadsRequest(BaseModel):
     """Request schema for calling multiple leads"""
-    lead_ids: List[int]
+    lead_ids: List[str]
     voiceId: str  # Voice agent name from UI (e.g., "Maya", "Alex")
 
 
 class CallLeadResponse(BaseModel):
     """Response schema for call_lead endpoint"""
     message: str
-    lead_id: int
+    lead_id: str
     customer_name: str
     phone_number: str
     vapi_response: dict
