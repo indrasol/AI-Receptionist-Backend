@@ -52,6 +52,15 @@ VAPI_AUTH_TOKEN=os.getenv("AI_RECEPTION_VAPI_AUTH_TOKEN")
 VAPI_ASSISTANT_ID=os.getenv("AI_RECEPTION_VAPI_ASSISTANT_ID")
 VAPI_PHONE_NUMBER_ID=os.getenv("AI_RECEPTION_VAPI_PHONE_NUMBER_ID")
 VAPI_WEBHOOK_SECRET=os.getenv('AI_RECEPTION_VAPI_WEBHOOK_SECRET', 'test-secret-12345')
+
+# OpenAI Configuration
+CSA_OPENAIIND=os.getenv('CSA_OPENAIIND')
+
+# Chunk generation limits
+MAX_TOTAL_CHUNKS_CHARACTERS = int(os.getenv('MAX_TOTAL_CHUNKS_CHARACTERS', '1000000'))  # 1M characters total
+MAX_CHUNK_CHARACTERS = int(os.getenv('MAX_CHUNK_CHARACTERS', '100000'))  # 100K characters per chunk
+MAX_CHUNKS_PER_URL = int(os.getenv('MAX_CHUNKS_PER_URL', '1'))  # 1 chunk per URL
+
 API_V1_STR=os.getenv('AI_RECEPTION_API_V1_STR', '/api/v1')
 HOST=os.getenv('AI_RECEPTION_HOST', '0.0.0.0')
 PORT=int(os.getenv('AI_RECEPTION_PORT', '8000'))
