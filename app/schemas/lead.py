@@ -105,6 +105,13 @@ class VapiVoicesResponse(BaseModel):
     total_count: int
 
 
+class VapiPhoneNumbersResponse(BaseModel):
+    """Response schema for VAPI available phone numbers list"""
+    message: str
+    phone_numbers: List[dict]  # List of available phone numbers
+    total_count: int
+
+
 class VapiVoiceIdResponse(BaseModel):
     """Response schema for VAPI voice ID lookup"""
     display_name: str
