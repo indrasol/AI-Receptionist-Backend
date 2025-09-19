@@ -1,11 +1,27 @@
 from fastapi import APIRouter, HTTPException, Depends
 from app.schemas.lead import VapiVoicesResponse, VapiPhoneNumbersResponse
+from app.schemas.phone_number import PhoneNumberResponse
 from app.utils.auth import get_current_user
+from app.database import get_supabase_client
+from app.services.vapi_phone_sync_service import VapiPhoneSyncService
+from pydantic import BaseModel
+from typing import List, Dict, Any
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Pydantic models for VAPI phone sync
+class VapiPhoneSyncResponse(BaseModel):
+    """Response model for VAPI phone sync results"""
+    success: bool
+    message: str
+    total_processed: int
+    inserted: int
+    updated: int
+    skipped: int
+    errors: List[str] = []
 
 
 @router.get("/get_assistants", response_model=VapiVoicesResponse)
@@ -154,86 +170,78 @@ async def get_assistants(current_user: dict = Depends(get_current_user)):
 @router.get("/get_available_phoneNumber", response_model=VapiPhoneNumbersResponse)
 async def get_available_phone_number(current_user: dict = Depends(get_current_user)):
     """
-    Get list of available phone numbers for outbound calls
+    Get list of available phone numbers that are not assigned to any assistant or workflow
     
     **Authentication Required**: Include `Authorization: Bearer <token>` header
     
     **Returns:**
-    - List of available phone numbers with their properties like number, provider, country, type
+    - List of unassigned phone numbers that can be used for new assistants/workflows
+    - Only returns numbers where assistant_id AND workflow_id are NULL
     
     **Raises:**
-    - None (returns predefined data)
+    - 400: If user has no organization
+    - 500: If database query fails
 
     Example Response:
     {
-        "message": "Successfully fetched 5 available phone numbers",
+        "message": "Successfully fetched 3 available phone numbers",
         "phone_numbers": [
             {
-                "id": "phone_001",
-                "number": "+1-555-0123",
-                "provider": "Twilio",
-                "country": "US",
-                "country_code": "+1",
-                "type": "local",
-                "area_code": "555",
+                "id": "ca76d992-58d8-4812-b43b-873fabf9a10c",
+                "number": "+14242919395",
+                "provider": "vapi",
                 "status": "active",
-                "description": "US local number for general outbound calls"
+                "name": null,
+                "assistant_id": null,
+                "provider_resource_id": "1efa2dca-42d8-4efe-9f3b-0b044b71f042",
+                "twilio_account_sid": null,
+                "workflow_id": null,
+                "created_at": "2025-09-19T18:18:56.781Z",
+                "updated_at": "2025-09-19T18:20:57.099Z"
             }
         ],
-        "total_count": 5
+        "total_count": 3
     }
     """
     try:
-        # Predefined list of available phone numbers
-        phone_numbers = [
-            {
-                "id": "phone_001",
-                "number": "+1-555-123-6186",
-                "provider": "Twilio",
-                "country": "US",
-                "country_code": "+1",
-                "status": "active",
-                "description": "US local number for general outbound calls"
-            },
-            {
-                "id": "phone_002", 
-                "number": "+1-555-123-6186",
-                "provider": "Twilio",
-                "country": "US",
-                "country_code": "+1",
-                "status": "active",
-                "description": "US local number for sales calls"
-            },
-            {
-                "id": "phone_003",
-                "number": "+1-555-123-6186",
-                "provider": "Twilio", 
-                "country": "US",
-                "country_code": "+1",
-                "status": "active",
-                "description": "US toll-free number for customer support"
-            },
-            {
-                "id": "phone_004",
-                "number": "+1-555-123-6186",
-                "provider": "Twilio",
-                "country": "UK",
-                "country_code": "+44",
-                "status": "active",
-                "description": "UK London number for international calls"
-            },
-            {
-                "id": "phone_005",
-                "number": "+1-555-123-6186",
-                "provider": "Twilio",
-                "country": "US", 
-                "country_code": "+1",
-                "status": "active",
-                "description": "US local number for marketing campaigns"
-            }
-        ]
+        # Get user's organization
+        organization_id = current_user.get("organization", {}).get("id")
+        if not organization_id:
+            raise HTTPException(status_code=400, detail="User has no organization")
         
-        logger.info(f"Successfully fetched {len(phone_numbers)} available phone numbers")
+        # Get Supabase client
+        supabase = get_supabase_client()
+        
+        # Query phone numbers from database - only return numbers not assigned to assistant or workflow
+        response = supabase.table("phone_numbers").select("*").eq("status", "active").is_("assistant_id", None).is_("workflow_id", None).order("created_at", desc=False).execute()
+        
+        if not response.data:
+            logger.warning(f"No available (unassigned) phone numbers found for organization {organization_id}")
+            return VapiPhoneNumbersResponse(
+                message="No available phone numbers found. All numbers are assigned to assistants or workflows.",
+                phone_numbers=[],
+                total_count=0
+            )
+        
+        # Convert database records to API format
+        phone_numbers = []
+        for record in response.data:
+            phone_number = {
+                "id": record["vapi_id"],
+                "number": record["number"],
+                "provider": record["provider"],
+                "status": record["status"],
+                "name": record.get("name"),
+                "assistant_id": record.get("assistant_id"),
+                "provider_resource_id": record.get("provider_resource_id"),
+                "twilio_account_sid": record.get("twilio_account_sid"),
+                "workflow_id": record.get("workflow_id"),
+                "created_at": record.get("created_at"),
+                "updated_at": record.get("updated_at")
+            }
+            phone_numbers.append(phone_number)
+        
+        logger.info(f"Successfully fetched {len(phone_numbers)} phone numbers for organization {organization_id}")
         
         return VapiPhoneNumbersResponse(
             message=f"Successfully fetched {len(phone_numbers)} available phone numbers",
@@ -241,6 +249,81 @@ async def get_available_phone_number(current_user: dict = Depends(get_current_us
             total_count=len(phone_numbers)
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Unexpected error fetching available phone numbers: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch available phone numbers: {str(e)}")
+        logger.error(f"Unexpected error fetching phone numbers: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch phone numbers: {str(e)}")
+
+
+@router.post("/sync_vapi_phone_numbers", response_model=VapiPhoneSyncResponse)
+async def sync_vapi_phone_numbers(current_user: dict = Depends(get_current_user)):
+    """
+    Sync phone numbers from VAPI API to our database
+    
+    **Authentication Required**: Include `Authorization: Bearer <token>` header
+    
+    **No Request Body Required**: This endpoint fetches phone numbers directly from VAPI API
+    
+    **Returns:**
+    - Sync statistics including inserted, updated, and skipped counts
+    
+    **Raises:**
+    - 400: If user has no organization or VAPI client not configured
+    - 500: If VAPI API call or sync operation fails
+
+    **Process:**
+    1. Calls VAPI API using client.phone_numbers.list()
+    2. Fetches all phone numbers for your VAPI account
+    3. Syncs them to your organization's database
+    4. Returns detailed sync statistics
+    
+    **Example Response:**
+    {
+        "success": true,
+        "message": "Sync completed: 5 inserted, 3 updated, 0 skipped",
+        "total_processed": 8,
+        "inserted": 5,
+        "updated": 3,
+        "skipped": 0,
+        "errors": []
+    }
+    """
+    try:
+        # Get user's organization
+        organization_id = current_user.get("organization", {}).get("id")
+        user_id = current_user.get("sub")
+        
+        if not organization_id:
+            raise HTTPException(status_code=400, detail="User has no organization")
+        
+        if not user_id:
+            raise HTTPException(status_code=400, detail="User ID not found")
+        
+        logger.info(f"Starting VAPI phone number sync from API for organization {organization_id} by user {user_id}")
+        
+        # Initialize sync service
+        sync_service = VapiPhoneSyncService()
+        
+        # Fetch from VAPI and sync to database
+        sync_result = await sync_service.sync_phone_numbers_from_vapi(
+            user_id=user_id,
+            organization_id=organization_id
+        )
+        
+        # Return response
+        return VapiPhoneSyncResponse(
+            success=sync_result["success"],
+            message=sync_result.get("message", "Sync completed"),
+            total_processed=sync_result["total_processed"],
+            inserted=sync_result["inserted"],
+            updated=sync_result["updated"],
+            skipped=sync_result["skipped"],
+            errors=sync_result.get("errors", [])
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error syncing VAPI phone numbers: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to sync phone numbers: {str(e)}")
