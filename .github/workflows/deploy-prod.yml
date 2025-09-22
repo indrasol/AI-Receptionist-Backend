@@ -67,7 +67,23 @@ jobs:
             --file Dockerfile \
             .
 
-      # 6) Deploy the new image to Azure Web App
+      # 6) Run Database Migrations
+      - name: "Run Database Migrations"
+        run: |
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+            echo "Running production migrations..."
+            python app/migrations/migration_runner.py --env prod
+          else
+            echo "Running development migrations..."
+            python app/migrations/migration_runner.py --env dev
+          fi
+        env:
+          SUPABASE_URL_DEV: ${{ secrets.SUPABASE_URL_DEV }}
+          SUPABASE_ANON_KEY_DEV: ${{ secrets.SUPABASE_ANON_KEY_DEV }}
+          SUPABASE_URL_PROD: ${{ secrets.SUPABASE_URL_PROD }}
+          SUPABASE_ANON_KEY_PROD: ${{ secrets.SUPABASE_ANON_KEY_PROD }}
+
+      # 7) Deploy the new image to Azure Web App
       - name: "Deploy to Azure Web App / slot"
         uses: azure/webapps-deploy@v3
         with:
