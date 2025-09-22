@@ -67,7 +67,19 @@ jobs:
             --file Dockerfile \
             .
 
-      # 6) Run Database Migrations
+      # 6) Setup Python for Migrations
+      - name: "Setup Python for Migrations"
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      # 7) Install Python Dependencies for Migrations
+      - name: "Install Python Dependencies"
+        run: |
+          pip install --upgrade pip
+          pip install -r app/requirements.txt
+
+      # 8) Run Database Migrations
       - name: "Run Database Migrations"
         run: |
           if [ "${GITHUB_REF_NAME}" = "main" ]; then
@@ -83,7 +95,7 @@ jobs:
           SUPABASE_URL_PROD: ${{ secrets.SUPABASE_URL_PROD }}
           SUPABASE_ANON_KEY_PROD: ${{ secrets.SUPABASE_ANON_KEY_PROD }}
 
-      # 7) Deploy the new image to Azure Web App
+      # 9) Deploy the new image to Azure Web App
       - name: "Deploy to Azure Web App / slot"
         uses: azure/webapps-deploy@v3
         with:
