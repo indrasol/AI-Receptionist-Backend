@@ -62,4 +62,26 @@ class PasswordResetRequest(BaseModel):
 
 class PasswordResetResponse(BaseModel):
     """Response model for password reset"""
+    message: str
+
+
+# --------------------------- OTP signup flow ---------------------------
+
+
+class OtpRequest(BaseModel):
+    """Payload for requesting an email OTP during signup"""
+    email: EmailStr
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    organization_name: Optional[str] = None
+
+
+class OtpVerifyRequest(BaseModel):
+    """Payload for verifying an OTP code sent to email"""
+    email: EmailStr
+    otp: str = Field(..., min_length=6, max_length=6, description="6-digit numeric code")
+
+
+class GenericMessage(BaseModel):
+    """Simple message-only response"""
     message: str 

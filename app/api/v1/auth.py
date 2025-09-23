@@ -160,4 +160,38 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         raise
     except Exception as e:
         logger.error(f"Get current user error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error") 
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ---------------------------------------------------------------------
+# OTP signup endpoints
+# ---------------------------------------------------------------------
+
+
+from app.schemas.auth import OtpRequest, OtpVerifyRequest, GenericMessage  # noqa: E402
+
+
+@router.post("/otp/request", response_model=GenericMessage, tags=["authentication"])
+async def request_email_otp(payload: OtpRequest):
+    """Generate a 6-digit OTP and email it to the user."""
+    try:
+        await auth_service.create_and_mail_otp(payload.email, payload.dict())
+        return {"message": "OTP sent"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"OTP request error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error during OTP request")
+
+
+@router.post("/otp/verify", response_model=GenericMessage, tags=["authentication"])
+async def verify_email_otp(payload: OtpVerifyRequest):
+    """Verify the 6-digit OTP provided by the user."""
+    try:
+        await auth_service.verify_otp_and_signup(payload.email, payload.otp)
+        return {"message": "OTP verified"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"OTP verify error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error during OTP verification") 

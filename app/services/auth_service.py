@@ -26,6 +26,10 @@ class AuthService:
                 "AI_RECEPTION_SUPABASE_URL, AI_RECEPTION_SUPABASE_SERVICE_ROLE_KEY, "
                 "AI_RECEPTION_SUPABASE_JWT_SECRET"
             )
+        
+        # Supabase client for OTP table operations
+        from app.database_operations import get_supabase_client  # local import to avoid circular
+        self._supabase = get_supabase_client()
     
     def _get_auth_headers(self) -> Dict[str, str]:
         """Get headers for Supabase auth API calls"""
@@ -358,6 +362,131 @@ class AuthService:
             )
             
         return token 
+
+    # ------------------------------------------------------------------
+    # OTP signup helpers
+    # ------------------------------------------------------------------
+
+    async def create_and_mail_otp(self, email: str, user_meta: dict):
+        """Generate 6-digit OTP, store its hash, and email the code."""
+        import secrets, hashlib, datetime as dt
+
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        otp_hash = hashlib.sha256(code.encode()).hexdigest()
+        expires_at = (dt.datetime.utcnow() + dt.timedelta(minutes=10)).isoformat()
+
+        # Upsert into email_otps table
+        self._supabase.table("email_otps").upsert({
+            "email": email,
+            "otp_hash": otp_hash,
+            "expires_at": expires_at,
+        }).execute()
+
+        # Send the e-mail (include first_name if provided)
+        first_name = user_meta.get("first_name") if isinstance(user_meta, dict) else None
+        client_ip = user_meta.get("client_ip") if isinstance(user_meta, dict) else None
+        self._send_email(email, code, first_name=first_name, client_ip=client_ip)
+
+    async def verify_otp_and_signup(self, email: str, code: str):
+        """Validate OTP; on success delete it (extend here to create user)."""
+        import hashlib, datetime as dt
+
+        hash_check = hashlib.sha256(code.encode()).hexdigest()
+        res = self._supabase.table("email_otps").select("*").eq("email", email).single().execute()
+        row = res.data if res.data else None
+
+        if not row or row["otp_hash"] != hash_check:
+            raise ValueError("Invalid OTP")
+
+        # Ensure both datetimes are timezone-aware (UTC) to avoid comparison errors
+        now_utc = dt.datetime.now(dt.timezone.utc)
+        expires_at = dt.datetime.fromisoformat(row["expires_at"])
+
+        # If Supabase returned a naive datetime (unlikely), assume UTC
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=dt.timezone.utc)
+
+        if now_utc > expires_at:
+            raise ValueError("OTP expired")
+
+        # Clean up
+        self._supabase.table("email_otps").delete().eq("email", email).execute()
+
+        # TODO: progress signup or mark verified
+
+    # ------------------------------------------------------------------
+    # E-mail sending (Office 365 / Outlook SMTP)
+    # ------------------------------------------------------------------
+
+    def _send_email(self, to_email: str, code: str, *, first_name: str | None = None, client_ip: str | None = None):
+        """Send OTP email with both plain-text and HTML parts."""
+        import smtplib, ssl, os, datetime as dt
+        from email.message import EmailMessage
+
+        product = os.getenv("PRODUCT_NAME", "AI Receptionist By Indrasol")
+        expire_minutes = 10
+        request_time = dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+
+        subject = f"Your {product} verification code"
+
+        preheader = f"Enter this code to continue. Expires in {expire_minutes} minutes."
+
+        # ---------- Plain-text fallback ----------
+        text = (
+            f"Hi{f' {first_name}' if first_name else ''},\n\n"
+            f"Your one-time verification code is: {code}\n\n"
+            f"It expires in {expire_minutes} minutes and can be used only once.\n"
+            f"Only enter this code in {product}. We'll never ask for it by phone or chat.\n\n"
+            f"Request details: {request_time}, IP {client_ip or 'Unknown'}\n"
+            "If this wasn’t you, just ignore this email or contact support@indrasol.com.\n\n"
+            f"— {product}"
+        )
+
+        # ---------- HTML version ----------
+        html = f"""\
+<!doctype html>
+<html>
+  <body style=\"margin:0;padding:0;background:#f6f7f9;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;\">
+    <span style=\"display:none!important;opacity:0;color:transparent;height:0;width:0;overflow:hidden;\">
+      {preheader}
+    </span>
+    <div style=\"max-width:560px;margin:40px auto;background:#fff;border-radius:12px;padding:28px;box-shadow:0 2px 12px rgba(0,0,0,.06)\">
+      <h2 style=\"margin:0 0 12px;font-weight:700;\">Your verification code</h2>
+      <p style=\"margin:0 0 18px;color:#444\">Use this code to continue signing in to <strong>{product}</strong>.</p>
+      <div style=\"font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size:28px;letter-spacing:4px;font-weight:800;padding:14px 16px; border:1px solid #e7e9ee;border-radius:10px;text-align:center;\">
+        {code}
+      </div>
+      <p style=\"margin:18px 0 8px;color:#444\">This code expires in <strong>{expire_minutes} minutes</strong> and can be used once.</p>
+      <p style=\"margin:0 0 18px;color:#444\">Only enter this code in {product}. We’ll never ask for it by phone or chat.</p>
+      <hr style=\"border:none;border-top:1px solid #eee;margin:18px 0\">
+      <p style=\"margin:0;color:#6b7280;font-size:12px;\">
+        Didn’t request this? Ignore this email or contact <a href=\"mailto:srvcs@indrasol.com\">srvcs@indrasol.com</a>.
+      </p>
+    </div>
+    <div style=\"text-align:center;color:#9aa0a6;font-size:12px;margin:12px 0;\">
+      © {dt.datetime.utcnow().year} {product}
+    </div>
+  </body>
+</html>
+"""
+
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"] = os.getenv("EMAIL_FROM")
+        msg["To"] = to_email
+        msg.set_content(text)
+        msg.add_alternative(html, subtype="html")
+
+        host = os.getenv("EMAIL_HOST", "smtp.gmail.com")
+        port = int(os.getenv("EMAIL_PORT", "587"))
+        user = os.getenv("EMAIL_USERNAME")
+        pwd = os.getenv("EMAIL_PASSWORD")
+
+        context = ssl.create_default_context()
+        with smtplib.SMTP(host, port) as server:
+            server.starttls(context=context)
+            server.login(user, pwd)
+            server.send_message(msg)
     
     async def _get_default_organization_id(self) -> str:
         """Get the default organization ID (CSA)"""
