@@ -409,6 +409,7 @@ async def create_receptionist(
     try:
         # Ensure user has organization context
         org_id = current_user.get("organization", {}).get("id")
+        print(f"org_id: {org_id}")
         if not org_id:
             raise HTTPException(status_code=400, detail="User does not belong to any organization")
 
@@ -417,7 +418,18 @@ async def create_receptionist(
         if not vapi_key:
             raise HTTPException(status_code=500, detail="VAPI_KEY not configured in environment")
 
-        org_name = current_user.get("organization", {}).get("name", "Organization")
+        org_name = current_user.get("organization", {}).get("name")
+        print(f"org_name: {org_name}")
+        if not org_name or org_name == "CSA":
+            try:
+                supabase_tmp = get_supabase_client()
+                org_lookup = supabase_tmp.table("organizations").select("name").eq("id", org_id).single().execute()
+                print(f"org_lookup: {org_lookup}")
+                if org_lookup.data:
+                    org_name = org_lookup.data["name"]
+            except Exception:
+                org_name = "Organization"
+
         voice_id = VOICE_ID_MAP.get(payload.assistant_voice, "spencer")
 
         assistant_payload = {
