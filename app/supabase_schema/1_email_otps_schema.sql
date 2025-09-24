@@ -5,6 +5,10 @@ CREATE TABLE IF NOT EXISTS email_otps (
     email TEXT PRIMARY KEY,                       -- E-mail address requesting the OTP
     otp_hash TEXT NOT NULL,                       -- SHA-256 hash of the 6-digit code
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL, -- Expiration timestamp (UTC)
+    -- Optional metadata captured during signup flow
+    organization_name TEXT,
+    first_name TEXT,
+    last_name TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

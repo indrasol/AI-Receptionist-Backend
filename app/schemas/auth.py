@@ -84,4 +84,15 @@ class OtpVerifyRequest(BaseModel):
 
 class GenericMessage(BaseModel):
     """Simple message-only response"""
-    message: str 
+    message: str
+
+
+# --------------------------- Token response ---------------------------
+
+
+class TokenResponse(BaseModel):
+    """JWT token response after successful OTP verification"""
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    message: str | None = None 

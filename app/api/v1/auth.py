@@ -168,7 +168,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 # ---------------------------------------------------------------------
 
 
-from app.schemas.auth import OtpRequest, OtpVerifyRequest, GenericMessage  # noqa: E402
+from app.schemas.auth import OtpRequest, OtpVerifyRequest, GenericMessage, TokenResponse  # noqa: E402
 
 
 @router.post("/otp/request", response_model=GenericMessage, tags=["authentication"])
@@ -184,12 +184,13 @@ async def request_email_otp(payload: OtpRequest):
         raise HTTPException(status_code=500, detail="Internal server error during OTP request")
 
 
-@router.post("/otp/verify", response_model=GenericMessage, tags=["authentication"])
+@router.post("/otp/verify", response_model=TokenResponse, tags=["authentication"])
 async def verify_email_otp(payload: OtpVerifyRequest):
     """Verify the 6-digit OTP provided by the user."""
     try:
-        await auth_service.verify_otp_and_signup(payload.email, payload.otp)
-        return {"message": "OTP verified"}
+        token_data = await auth_service.verify_otp_and_signup(payload.email, payload.otp)
+        token_data["message"] = "OTP verified"
+        return token_data
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

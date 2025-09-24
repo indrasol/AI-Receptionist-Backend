@@ -371,20 +371,59 @@ class AuthService:
         """Generate 6-digit OTP, store its hash, and email the code."""
         import secrets, hashlib, datetime as dt
 
+        # --------------------------------------------------------------
+        # Determine flow (signup vs login) based on presence of metadata
+        # --------------------------------------------------------------
+        norm_meta = user_meta or {}
+        # Support camelCase keys from frontend
+        if "organizationName" in norm_meta and not norm_meta.get("organization_name"):
+            norm_meta["organization_name"] = norm_meta["organizationName"]
+
+        if "firstName" in norm_meta and not norm_meta.get("first_name"):
+            norm_meta["first_name"] = norm_meta["firstName"]
+
+        if "lastName" in norm_meta and not norm_meta.get("last_name"):
+            norm_meta["last_name"] = norm_meta["lastName"]
+
+        is_signup = any(norm_meta.get(k) for k in ("organization_name", "first_name", "last_name"))
+
+        # Check whether user already exists in profiles
+        try:
+            prof_res = self._supabase.table("profiles").select("email").eq("email", email).single().execute()
+            user_exists = bool(prof_res.data)
+        except Exception:
+            user_exists = False  # profiles table may not exist yet
+
+        if is_signup and user_exists:
+            raise ValueError("Account already exists. Please log in instead.")
+
+        if (not is_signup) and (not user_exists):
+            raise ValueError("No account found. Please sign up first.")
+
+        # --------------------------------------------------------------
+        # Generate and store OTP
+        # --------------------------------------------------------------
         code = f"{secrets.randbelow(1_000_000):06d}"
         otp_hash = hashlib.sha256(code.encode()).hexdigest()
         expires_at = (dt.datetime.utcnow() + dt.timedelta(minutes=10)).isoformat()
 
-        # Upsert into email_otps table
-        self._supabase.table("email_otps").upsert({
+        payload = {
             "email": email,
             "otp_hash": otp_hash,
             "expires_at": expires_at,
-        }).execute()
+        }
+
+        if is_signup and isinstance(norm_meta, dict):
+            for field in ("organization_name", "first_name", "last_name"):
+                value = norm_meta.get(field)
+                if value:
+                    payload[field] = value
+
+        self._supabase.table("email_otps").upsert(payload).execute()
 
         # Send the e-mail (include first_name if provided)
-        first_name = user_meta.get("first_name") if isinstance(user_meta, dict) else None
-        client_ip = user_meta.get("client_ip") if isinstance(user_meta, dict) else None
+        first_name = norm_meta.get("first_name") if isinstance(norm_meta, dict) else None
+        client_ip = norm_meta.get("client_ip") if isinstance(norm_meta, dict) else None
         self._send_email(email, code, first_name=first_name, client_ip=client_ip)
 
     async def verify_otp_and_signup(self, email: str, code: str):
@@ -413,6 +452,149 @@ class AuthService:
         self._supabase.table("email_otps").delete().eq("email", email).execute()
 
         # TODO: progress signup or mark verified
+
+        # ------------------------------------------------------------------
+        # Persist user profile
+        # ------------------------------------------------------------------
+        org_name = row.get("organization_name")
+        first_name = row.get("first_name")
+        last_name = row.get("last_name")
+
+        profile_payload = {
+            "email": email,
+            "organization_name": org_name,
+            "first_name": first_name,
+            "last_name": last_name,
+        }
+
+        # If organization table exists, fetch or create row
+        try:
+            if org_name:
+                org_res = self._supabase.table("organizations").select("id").ilike("name", org_name).execute()
+                if org_res.data and len(org_res.data) > 0:
+                    org_id = org_res.data[0]["id"]
+                else:
+                    # Insert new organization
+                    print(org_name, "Inserting new organization")
+                    insert_res = self._supabase.table("organizations").insert({"name": org_name}).execute()
+                    org_id = insert_res.data[0]["id"] if (insert_res.data and len(insert_res.data) > 0) else None
+ 
+                if org_id:
+                    profile_payload["organization_id"] = org_id
+        except Exception as e:
+            logger.warning(f"Organization fetch/create failed: {e}")
+
+        # Upsert profile row keyed by email (initial, without user_id yet)
+        self._supabase.table("profiles").upsert(profile_payload, on_conflict="email").execute()
+
+        # ------------------------------------------------------------------
+        # Ensure Supabase auth.users has the same metadata
+        # ------------------------------------------------------------------
+        try:
+            # Look for existing auth user
+            auth_user = await self._find_user_by_email(email)
+
+            if not auth_user:
+                # Create a new auth user with confirmed email & metadata
+                import requests, secrets, string
+
+                random_pwd = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32))
+
+                create_res = requests.post(
+                    f"{self.auth_url}/admin/users",
+                    headers=self._get_auth_headers(),
+                    json={
+                        "email": email,
+                        "password": random_pwd,
+                        "email_confirm": True,
+                        "user_metadata": {
+                            "first_name": first_name,
+                            "last_name": last_name,
+                            "organization_id": profile_payload.get("organization_id"),
+                            "organization_name": org_name,
+                            "signup_flow": True,
+                        },
+                    },
+                )
+
+                if not create_res.ok:
+                    logger.warning(f"Failed to create auth user: {create_res.text}")
+                else:
+                    auth_user = create_res.json()
+
+            else:
+                # Update existing metadata
+                user_id = auth_user["id"] if isinstance(auth_user, dict) else auth_user.get("id")
+
+                if user_id:
+                    import requests
+
+                    requests.put(
+                        f"{self.auth_url}/admin/users/{user_id}",
+                        headers=self._get_auth_headers(),
+                        json={
+                            "user_metadata": {
+                                "first_name": first_name,
+                                "last_name": last_name,
+                                "organization_id": profile_payload.get("organization_id"),
+                                "organization_name": org_name,
+                                "signup_flow": True,
+                            }
+                        },
+                    )
+        except Exception as e:
+            logger.warning(f"Failed to sync auth.users metadata: {e}")
+
+        # ------------------------------------------------------------------
+        # Update profiles with user_id now that we have auth_user
+        # ------------------------------------------------------------------
+
+        try:
+            if auth_user and isinstance(auth_user, dict):
+                user_id_val = auth_user.get("id")
+                if user_id_val:
+                    self._supabase.table("profiles").update({"user_id": user_id_val}).eq("email", email).execute()
+        except Exception as e:
+            logger.warning(f"Failed to set user_id in profiles: {e}")
+
+        # ------------------------------------------------------------------
+        # Issue JWT for the newly verified user
+        # ------------------------------------------------------------------
+        token = self._generate_jwt({
+            "sub": email,
+            "email": email,
+            "user_metadata": {
+                "first_name": first_name,
+                "last_name": last_name,
+                "organization_id": profile_payload.get("organization_id"),
+                "organization_name": org_name,
+            }
+        })
+
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "expires_in": 24 * 3600,
+        }
+
+    # ------------------------------------------------------------------
+    # JWT helper
+    # ------------------------------------------------------------------
+
+    def _generate_jwt(self, claims: dict, *, expires_in_sec: int = 24 * 3600) -> str:
+        """Generate a signed JWT using the Supabase JWT secret."""
+        import jwt, datetime as dt, os
+
+        now = dt.datetime.utcnow()
+        payload = {
+            **claims,
+            "iat": int(now.timestamp()),
+            "exp": int((now + dt.timedelta(seconds=expires_in_sec)).timestamp()),
+            "aud": "authenticated",
+        }
+
+        secret = os.getenv("AI_RECEPTION_SUPABASE_JWT_SECRET", self.supabase_jwt_secret)
+        return jwt.encode(payload, secret, algorithm="HS256")
 
     # ------------------------------------------------------------------
     # E-mail sending (Office 365 / Outlook SMTP)
