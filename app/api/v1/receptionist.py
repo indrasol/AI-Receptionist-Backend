@@ -7,6 +7,8 @@ from app.services.vapi_phone_sync_service import VapiPhoneSyncService
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import logging
+import os
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -329,6 +331,18 @@ async def sync_vapi_phone_numbers(current_user: dict = Depends(get_current_user)
         raise HTTPException(status_code=500, detail=f"Failed to sync phone numbers: {str(e)}")
 
 
+async def _delete_vapi_assistant(assistant_id: str, vapi_key: str):
+    """Best-effort delete of a Vapi assistant"""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            await client.delete(
+                f"https://api.vapi.ai/assistant/{assistant_id}",
+                headers={"Authorization": f"Bearer {vapi_key}"},
+            )
+    except Exception as e:  # nosec
+        logger.warning(f"Failed to cleanup Vapi assistant {assistant_id}: {e}")
+
+
 class ReceptionistCreateRequest(BaseModel):
     """Request payload for creating a new receptionist"""
     name: str
@@ -362,6 +376,19 @@ class ReceptionistListResponse(BaseModel):
     receptionists: List[ReceptionistListItem]
     total_count: int
 
+VOICE_ID_MAP = {
+    "Alex": "Cole",
+    "Maya": "Harry",
+    "Jordan": "Spencer",
+    "Priya": "Neha",
+    "Emma": "Kylie",
+    "Grace": "Savannah",
+    "Sophie": "Paige",
+    "Arjun": "Rohan",
+    "Luna": "Hana",
+    "Max": "Elliot",
+}
+
 @router.post("/", response_model=ReceptionistResponse)
 async def create_receptionist(
     payload: ReceptionistCreateRequest,
@@ -385,22 +412,88 @@ async def create_receptionist(
         if not org_id:
             raise HTTPException(status_code=400, detail="User does not belong to any organization")
 
+        # 1. Create assistant in Vapi
+        vapi_key = os.getenv("AI_RECEPTION_VAPI_AUTH_TOKEN")
+        if not vapi_key:
+            raise HTTPException(status_code=500, detail="VAPI_KEY not configured in environment")
+
+        org_name = current_user.get("organization", {}).get("name", "Organization")
+        voice_id = VOICE_ID_MAP.get(payload.assistant_voice, "spencer")
+
+        assistant_payload = {
+            "name": f"{org_name} - {payload.name}",
+            "voice": {"voiceId": voice_id, "provider": "vapi"},
+            "model": {
+                "provider": "openai",
+                "model": "gpt-4o",
+                "maxTokens": 90,
+            },
+            "firstMessage": f"Hello! You’re speaking with AI Virtual Assistant of {org_name}. How can I assist you today?",
+            "voicemailMessage": "Please call back when you're available.",
+            "voicemailDetection": {
+            "provider": "vapi",
+            "backoffPlan": {
+                "maxRetries": 6,
+                "startAtSeconds": 5,
+                "frequencySeconds": 5
+            },
+            "beepMaxAwaitSeconds": 1
+            },
+            "backgroundDenoisingEnabled": True,
+            "startSpeakingPlan": {
+                "waitSeconds": 1,
+                "transcriptionEndpointingPlan": {
+                    "onPunctuationSeconds": 0.5
+                }
+            },
+            "stopSpeakingPlan": {
+                "numWords": 1,
+                "voiceSeconds": 0.1
+            },
+            "endCallMessage": "Goodbye.",
+            "transcriber": {"model": "nova-2", "language": "en", "provider": "deepgram"},
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                vapi_res = await client.post(
+                    "https://api.vapi.ai/assistant",
+                    headers={
+                        "Authorization": f"Bearer {vapi_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=assistant_payload,
+                )
+            if vapi_res.status_code >= 400:
+                logger.error(f"Vapi error {vapi_res.status_code}: {vapi_res.text}")
+                raise HTTPException(status_code=500, detail="Failed to create assistant in Vapi")
+
+            assistant_data = vapi_res.json()
+            assistant_id = assistant_data.get("id")
+        except Exception as e:
+            logger.error(f"Error calling Vapi: {e}")
+            raise HTTPException(status_code=500, detail="Failed to create assistant in Vapi")
+
         supabase = get_supabase_client()
 
-        # Prepare insert payload
         insert_data = {
             "org_id": org_id,
             "name": payload.name,
             "description": payload.description,
             "assistant_voice": payload.assistant_voice,
             "phone_number": payload.phone_number,
+            "assistant_id": assistant_id,
         }
 
-        # Insert into Supabase and return single row
-        res = supabase.table("receptionists").insert(insert_data).execute()
-
-        if not res.data:
-            raise HTTPException(status_code=500, detail="Failed to create receptionist")
+        try:
+            res = supabase.table("receptionists").insert(insert_data).execute()
+            if not res.data:
+                raise ValueError("Failed to create receptionist record")
+        except Exception as db_err:
+            # Cleanup assistant in Vapi then propagate
+            await _delete_vapi_assistant(assistant_id, vapi_key)
+            logger.error(f"DB insert failed, cleaned Vapi assistant {assistant_id}: {db_err}")
+            raise HTTPException(status_code=500, detail="Failed to create receptionist in database") from db_err
 
         return ReceptionistResponse(**res.data[0])
 
