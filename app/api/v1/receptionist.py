@@ -9,6 +9,7 @@ from typing import List, Dict, Any, Optional
 import logging
 import os
 import httpx
+from app.services.vapi_assistant import build_assistant_payload
 
 logger = logging.getLogger(__name__)
 
@@ -419,12 +420,10 @@ async def create_receptionist(
             raise HTTPException(status_code=500, detail="VAPI_KEY not configured in environment")
 
         org_name = current_user.get("organization", {}).get("name")
-        print(f"org_name: {org_name}")
         if not org_name or org_name == "CSA":
             try:
                 supabase_tmp = get_supabase_client()
                 org_lookup = supabase_tmp.table("organizations").select("name").eq("id", org_id).single().execute()
-                print(f"org_lookup: {org_lookup}")
                 if org_lookup.data:
                     org_name = org_lookup.data["name"]
             except Exception:
@@ -432,39 +431,7 @@ async def create_receptionist(
 
         voice_id = VOICE_ID_MAP.get(payload.assistant_voice, "spencer")
 
-        assistant_payload = {
-            "name": f"{org_name} - {payload.name}",
-            "voice": {"voiceId": voice_id, "provider": "vapi"},
-            "model": {
-                "provider": "openai",
-                "model": "gpt-4o",
-                "maxTokens": 90,
-            },
-            "firstMessage": f"Hello! You’re speaking with AI Virtual Assistant of {org_name}. How can I assist you today?",
-            "voicemailMessage": "Please call back when you're available.",
-            "voicemailDetection": {
-            "provider": "vapi",
-            "backoffPlan": {
-                "maxRetries": 6,
-                "startAtSeconds": 5,
-                "frequencySeconds": 5
-            },
-            "beepMaxAwaitSeconds": 1
-            },
-            "backgroundDenoisingEnabled": True,
-            "startSpeakingPlan": {
-                "waitSeconds": 1,
-                "transcriptionEndpointingPlan": {
-                    "onPunctuationSeconds": 0.5
-                }
-            },
-            "stopSpeakingPlan": {
-                "numWords": 1,
-                "voiceSeconds": 0.1
-            },
-            "endCallMessage": "Goodbye.",
-            "transcriber": {"model": "nova-2", "language": "en", "provider": "deepgram"},
-        }
+        assistant_payload = build_assistant_payload(org_name, payload.name, voice_id)
 
         try:
             async with httpx.AsyncClient(timeout=30) as client:
@@ -520,6 +487,7 @@ async def get_receptionists(current_user: dict = Depends(get_current_user)):
     """Return all receptionists for the user's organization."""
     try:
         org_id = current_user.get("organization", {}).get("id")
+        print(f"org_id12334: {org_id}")
         if not org_id:
             raise HTTPException(status_code=400, detail="User does not belong to any organization")
 
@@ -545,6 +513,56 @@ async def get_receptionists(current_user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Unexpected error fetching receptionists: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch receptionists: {str(e)}")
+
+class ReceptionistUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    assistant_voice: Optional[str] = None
+    phone_number: Optional[str] = None
+
+
+@router.patch("/{receptionist_id}", response_model=ReceptionistResponse)
+async def update_receptionist(receptionist_id: str, payload: ReceptionistUpdateRequest, current_user: dict = Depends(get_current_user)):
+    org_id = current_user.get("organization", {}).get("id")
+    if not org_id:
+        raise HTTPException(status_code=400, detail="User has no organization")
+
+    supabase = get_supabase_client()
+    # fetch row
+    rec_res = supabase.table("receptionists").select("*").eq("id", receptionist_id).eq("org_id", org_id).single().execute()
+    if not rec_res.data:
+        raise HTTPException(status_code=404, detail="Receptionist not found")
+
+    rec = rec_res.data
+    assistant_id = rec.get("assistant_id")
+
+    # Build new assistant payload & patch Vapi
+    vapi_key = os.getenv("AI_RECEPTION_VAPI_AUTH_TOKEN")
+    voice_id = VOICE_ID_MAP.get(payload.assistant_voice or rec.get("assistant_voice"), "spencer")
+    assistant_payload = build_assistant_payload(current_user["organization"]["name"], payload.name or rec["name"], voice_id)
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        vapi_resp = await client.patch(
+            f"https://api.vapi.ai/assistant/{assistant_id}",
+            headers={"Authorization": f"Bearer {vapi_key}", "Content-Type": "application/json"},
+            json=assistant_payload,
+        )
+    if vapi_resp.status_code >= 400:
+        raise HTTPException(status_code=500, detail="Failed to update assistant in Vapi")
+
+    # build update dict for DB
+    update_dict = {k: v for k, v in {
+        "name": payload.name,
+        "description": payload.description,
+        "assistant_voice": payload.assistant_voice,
+        "phone_number": payload.phone_number,
+    }.items() if v is not None}
+
+    if update_dict:
+        supabase.table("receptionists").update(update_dict).eq("id", receptionist_id).execute()
+
+    final_row = supabase.table("receptionists").select("*").eq("id", receptionist_id).single().execute().data
+    return ReceptionistResponse(**final_row)
 
 class MessageResponse(BaseModel):
     message: str
