@@ -144,16 +144,27 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         if not result["valid"]:
             raise HTTPException(status_code=401, detail=result["message"])
         
-        # Return user claims from token
+        # Base claims
         claims = result["claims"]
+
+        email = claims.get("email")
+        profile = None
+        try:
+            from app.database_operations import get_supabase_client  # local import to avoid circular
+            supa = get_supabase_client()
+            prof_res = supa.table("profiles").select("first_name,last_name,organization_name,user_id").eq("email", email).single().execute()
+            profile = prof_res.data if prof_res.data else None
+        except Exception as e:
+            logger.warning(f"/auth/me profile lookup failed: {e}")
+
         return {
-            "user_id": claims.get("sub"),
-            "email": claims.get("email"),
-            "username": claims.get("user_metadata", {}).get("username"),
-            "first_name": claims.get("user_metadata", {}).get("first_name"),
-            "last_name": claims.get("user_metadata", {}).get("last_name"),
+            "user_id": profile.get("user_id") if profile else claims.get("sub"),
+            "email": email,
+            "first_name": profile.get("first_name") if profile else None,
+            "last_name": profile.get("last_name") if profile else None,
+            "organization_name": profile.get("organization_name") if profile else None,
             "exp": claims.get("exp"),
-            "iat": claims.get("iat")
+            "iat": claims.get("iat"),
         }
         
     except HTTPException:

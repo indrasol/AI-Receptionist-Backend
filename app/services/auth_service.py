@@ -182,10 +182,12 @@ class AuthService:
             logger.info(f"Using JWT secret: {self.supabase_jwt_secret[:10]}...")
             
             decoded = jwt.decode(
-                token, 
-                self.supabase_jwt_secret, 
+                token,
+                self.supabase_jwt_secret,
                 algorithms=["HS256"],
-                audience="authenticated"  # Supabase expects this audience
+                audience="authenticated",
+                leeway=10,
+                options={"verify_iat": False},  # ignore minimal clock skew issues
             )
             logger.info(f"Token verified successfully, claims: {decoded}")
             return {"valid": True, "claims": decoded}
@@ -594,7 +596,7 @@ class AuthService:
         return {
             "access_token": token,
             "token_type": "bearer",
-            "expires_in": 24 * 3600,
+            "expires_in": 7 * 24 * 3600,
         }
 
     # ------------------------------------------------------------------
@@ -608,7 +610,7 @@ class AuthService:
         now = dt.datetime.utcnow()
         payload = {
             **claims,
-            "iat": int(now.timestamp()),
+            "iat": int(now.timestamp()) - 1,  # back-date by 1s to avoid clock skew
             "exp": int((now + dt.timedelta(seconds=expires_in_sec)).timestamp()),
             "aud": "authenticated",
         }
