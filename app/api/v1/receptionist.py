@@ -347,6 +347,21 @@ class ReceptionistResponse(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
+class ReceptionistListItem(BaseModel):
+    id: str
+    org_id: str
+    name: str
+    description: Optional[str] = None
+    assistant_voice: Optional[str] = None
+    phone_number: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+class ReceptionistListResponse(BaseModel):
+    message: str
+    receptionists: List[ReceptionistListItem]
+    total_count: int
+
 @router.post("/", response_model=ReceptionistResponse)
 async def create_receptionist(
     payload: ReceptionistCreateRequest,
@@ -394,3 +409,27 @@ async def create_receptionist(
     except Exception as e:
         logger.error(f"Unexpected error creating receptionist: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to create receptionist: {str(e)}")
+
+@router.get("/get_receptionists", response_model=ReceptionistListResponse)
+async def get_receptionists(current_user: dict = Depends(get_current_user)):
+    """Return all receptionists for the user's organization."""
+    try:
+        org_id = current_user.get("organization", {}).get("id")
+        if not org_id:
+            raise HTTPException(status_code=400, detail="User does not belong to any organization")
+
+        supabase = get_supabase_client()
+        res = supabase.table("receptionists").select("*").eq("org_id", org_id).order("created_at", desc=False).execute()
+
+        receptionists = res.data or []
+        return ReceptionistListResponse(
+            message=f"Successfully fetched {len(receptionists)} receptionists",
+            receptionists=receptionists,
+            total_count=len(receptionists),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error fetching receptionists: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch receptionists: {str(e)}")
