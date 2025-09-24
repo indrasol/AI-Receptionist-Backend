@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS receptionists (
     org_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     description TEXT,
-    assistant_name TEXT,
+    assistant_voice TEXT,
     phone_number TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()

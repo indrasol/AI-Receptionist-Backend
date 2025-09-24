@@ -5,7 +5,7 @@ from app.utils.auth import get_current_user
 from app.database import get_supabase_client
 from app.services.vapi_phone_sync_service import VapiPhoneSyncService
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -327,3 +327,70 @@ async def sync_vapi_phone_numbers(current_user: dict = Depends(get_current_user)
     except Exception as e:
         logger.error(f"Unexpected error syncing VAPI phone numbers: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to sync phone numbers: {str(e)}")
+
+
+class ReceptionistCreateRequest(BaseModel):
+    """Request payload for creating a new receptionist"""
+    name: str
+    description: Optional[str] = None
+    assistant_voice: Optional[str] = None
+    phone_number: Optional[str] = None
+
+class ReceptionistResponse(BaseModel):
+    """Response model after creating receptionist"""
+    id: str
+    org_id: str
+    name: str
+    description: Optional[str] = None
+    assistant_voice: Optional[str] = None
+    phone_number: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+@router.post("/", response_model=ReceptionistResponse)
+async def create_receptionist(
+    payload: ReceptionistCreateRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Create a new receptionist for the current user's organization.
+
+    **Authentication Required**: Include `Authorization: Bearer <token>` header
+
+    **Body Parameters:**
+    - `name` (str, required): Receptionist name
+    - `description` (str, optional): Description of duties
+    - `assistant_name` (str, optional): Selected assistant identifier
+    - `phone_number` (str, optional): Selected phone number (e.164)
+
+    **Returns:** Newly created receptionist record
+    """
+    try:
+        # Ensure user has organization context
+        org_id = current_user.get("organization", {}).get("id")
+        if not org_id:
+            raise HTTPException(status_code=400, detail="User does not belong to any organization")
+
+        supabase = get_supabase_client()
+
+        # Prepare insert payload
+        insert_data = {
+            "org_id": org_id,
+            "name": payload.name,
+            "description": payload.description,
+            "assistant_voice": payload.assistant_voice,
+            "phone_number": payload.phone_number,
+        }
+
+        # Insert into Supabase and return single row
+        res = supabase.table("receptionists").insert(insert_data).execute()
+
+        if not res.data:
+            raise HTTPException(status_code=500, detail="Failed to create receptionist")
+
+        return ReceptionistResponse(**res.data[0])
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error creating receptionist: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to create receptionist: {str(e)}")
