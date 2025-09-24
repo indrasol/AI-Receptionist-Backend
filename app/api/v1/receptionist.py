@@ -419,7 +419,14 @@ async def get_receptionists(current_user: dict = Depends(get_current_user)):
             raise HTTPException(status_code=400, detail="User does not belong to any organization")
 
         supabase = get_supabase_client()
-        res = supabase.table("receptionists").select("*").eq("org_id", org_id).order("created_at", desc=False).execute()
+        res = (
+            supabase.table("receptionists")
+            .select("*")
+            .eq("org_id", org_id)
+            .eq("is_deleted", False)
+            .order("created_at", desc=False)
+            .execute()
+        )
 
         receptionists = res.data or []
         return ReceptionistListResponse(
@@ -433,3 +440,34 @@ async def get_receptionists(current_user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Unexpected error fetching receptionists: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch receptionists: {str(e)}")
+
+class MessageResponse(BaseModel):
+    message: str
+
+@router.delete("/{receptionist_id}", response_model=MessageResponse)
+async def delete_receptionist(receptionist_id: str, current_user: dict = Depends(get_current_user)):
+    """Delete a receptionist belonging to the user's organization."""
+    try:
+        org_id = current_user.get("organization", {}).get("id")
+        if not org_id:
+            raise HTTPException(status_code=400, detail="User does not belong to any organization")
+
+        supabase = get_supabase_client()
+        res = (
+            supabase.table("receptionists")
+            .update({"is_deleted": True})
+            .eq("id", receptionist_id)
+            .eq("org_id", org_id)
+            .execute()
+        )
+
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Receptionist not found or not allowed")
+
+        return MessageResponse(message="Receptionist deleted")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error deleting receptionist: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete receptionist: {str(e)}")

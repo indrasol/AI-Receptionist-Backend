@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS receptionists (
     description TEXT,
     assistant_voice TEXT,
     phone_number TEXT,
+    is_deleted BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
