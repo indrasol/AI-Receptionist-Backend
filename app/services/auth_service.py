@@ -387,18 +387,38 @@ class AuthService:
 
         is_signup = any(norm_meta.get(k) for k in ("organization_name", "first_name", "last_name"))
 
-        # Check whether user already exists in profiles
+        # ---------------------------------------------
+        # A) Does a user with this email already exist?
+        # ---------------------------------------------
         try:
             prof_res = self._supabase.table("profiles").select("email").eq("email", email).single().execute()
             user_exists = bool(prof_res.data)
         except Exception:
-            user_exists = False  # profiles table may not exist yet
+            user_exists = False
 
         if is_signup and user_exists:
-            raise ValueError("Account already exists. Please log in instead.")
+            raise ValueError("An account with this email already exists. Please log in instead.")
 
         if (not is_signup) and (not user_exists):
-            raise ValueError("No account found. Please sign up first.")
+            raise ValueError("No account found with this email. Please sign up first.")
+
+        # -------------------------------------------------
+        # B) Does the organisation name already exist?
+        # -------------------------------------------------
+        org_exists = False
+        if is_signup and norm_meta.get("organization_name"):
+            try:
+                org_check = self._supabase.table("organizations").select("id").ilike("name", norm_meta["organization_name"]).execute()
+                org_exists = bool(org_check.data)
+            except Exception:
+                org_exists = False
+
+        if is_signup and user_exists is False and org_exists:
+            raise ValueError(
+                "An account for this organisation already exists. "
+                "Ask the admin to invite you, or sign in instead. "
+                "If you believe this is an error, contact srvcs@indrasol.com."
+            )
 
         # --------------------------------------------------------------
         # Generate and store OTP
