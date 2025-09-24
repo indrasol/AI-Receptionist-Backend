@@ -247,7 +247,6 @@ async def get_user_organization_from_claims(user_claims: dict) -> Optional[Dict[
         # Check if organization info is already in JWT claims
         org_id = user_claims.get("organization_id")
         org_name = user_claims.get("organization_name")
-        print(f"org_id12334: {org_id}")
         if org_id:
             # Get organization details from database
             supabase = get_supabase_client()
@@ -255,7 +254,6 @@ async def get_user_organization_from_claims(user_claims: dict) -> Optional[Dict[
             
             if org_result.data:
                 db_name = org_result.data[0]["name"]
-                print(f"db_name12334: {db_name}")
                 logger.info(f"Found organization {db_name} for user from JWT claims")
                 return {
                     "id": org_id,
@@ -285,7 +283,6 @@ async def get_user_organization(user_id: str, user_claims: dict = None) -> Optio
     """
     try:
         supabase = get_supabase_client()
-        print(f"user_id12334*********++++++: {user_id}")
         query_col = "user_id" if "@" not in user_id else "email"
         prof_resp = (
             supabase.table("profiles")
@@ -294,7 +291,6 @@ async def get_user_organization(user_id: str, user_claims: dict = None) -> Optio
             .single()
             .execute()
         )
-        print(f"prof_resp12334*********: {prof_resp}")
         logger.debug(f"Profile org lookup response: {prof_resp}")
 
         if prof_resp.data and prof_resp.data.get("organization_id"):

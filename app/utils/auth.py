@@ -40,7 +40,6 @@ async def get_current_user(authorization: str = Depends(http_bearer)):
             
             # Get user's organization from metadata (pass claims for efficiency)
             user_org = await get_user_organization(user.get('claims').get('sub'), user.get('claims'))
-            print(f"user_org12334*********: {user_org}")
             if not user_org:
                 raise HTTPException(status_code=400, detail="User has no organization configured")
             
