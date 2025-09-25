@@ -606,6 +606,27 @@ async def delete_receptionist(receptionist_id: str, current_user: dict = Depends
         if not res.data:
             raise HTTPException(status_code=404, detail="Receptionist not found or not allowed")
 
+        # Unlink phone number in background
+        assistant_id_del = res.data[0].get("assistant_id") if isinstance(res.data, list) else None
+        if assistant_id_del:
+            import asyncio, httpx
+            async def _unlink_phone():
+                supabase_local = get_supabase_client()
+                phone_res = supabase_local.table("phone_numbers").select("id,vapi_id").eq("assistant_id", assistant_id_del).single().execute()
+                if phone_res.data and phone_res.data.get("vapi_id"):
+                    vapi_phone = phone_res.data["vapi_id"]
+                    vapi_key_local = os.getenv("AI_RECEPTION_VAPI_AUTH_TOKEN")
+                    await asyncio.sleep(2)
+                    async with httpx.AsyncClient(timeout=30) as client:
+                        await client.patch(
+                            f"https://api.vapi.ai/phone-number/{vapi_phone}",
+                            headers={"Authorization": f"Bearer {vapi_key_local}", "Content-Type": "application/json"},
+                            json={"assistantId": None},
+                        )
+                    supabase_local.table("phone_numbers").update({"assistant_id": None}).eq("id", phone_res.data["id"]).execute()
+
+            asyncio.create_task(_unlink_phone())
+
         return MessageResponse(message="Receptionist deleted")
 
     except HTTPException:
