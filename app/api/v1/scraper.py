@@ -79,6 +79,14 @@ async def scrape_url(
             # Insert chunks into database
             result = supabase.table("chunks").insert(chunks).execute()
             saved_chunks = result.data if result.data else []
+
+        # sync assistant prompt
+        from app.services.vapi_assistant import sync_assistant_prompt
+        if request.receptionist_id:
+            rec_row = supabase.table("receptionists").select("assistant_id").eq("id", request.receptionist_id).single().execute()
+            assistant_id = rec_row.data.get("assistant_id") if rec_row.data else None
+            if assistant_id:
+                await sync_assistant_prompt(assistant_id, request.receptionist_id)
         
         processing_time = time.time() - start_time
         
