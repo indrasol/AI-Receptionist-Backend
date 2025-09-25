@@ -10,6 +10,7 @@ import logging
 import os
 import httpx
 from app.services.vapi_assistant import build_assistant_payload
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -473,6 +474,24 @@ async def create_receptionist(
             await _delete_vapi_assistant(assistant_id, vapi_key)
             logger.error(f"DB insert failed, cleaned Vapi assistant {assistant_id}: {db_err}")
             raise HTTPException(status_code=500, detail="Failed to create receptionist in database") from db_err
+
+        # Link phone number -> assistant in Vapi and DB
+        if payload.phone_number:
+            phone_row = supabase.table("phone_numbers").select("id,vapi_id").eq("number", payload.phone_number).single().execute()
+            if phone_row.data and phone_row.data.get("vapi_id"):
+                vapi_phone_id = phone_row.data["vapi_id"]
+
+                async def _link_phone():
+                    await asyncio.sleep(3)
+                    async with httpx.AsyncClient(timeout=30) as client:
+                        await client.patch(
+                            f"https://api.vapi.ai/phone-number/{vapi_phone_id}",
+                            headers={"Authorization": f"Bearer {vapi_key}", "Content-Type": "application/json"},
+                            json={"assistantId": assistant_id},
+                        )
+                    supabase.table("phone_numbers").update({"assistant_id": assistant_id}).eq("id", phone_row.data["id"]).execute()
+
+                asyncio.create_task(_link_phone())
 
         return ReceptionistResponse(**res.data[0])
 
