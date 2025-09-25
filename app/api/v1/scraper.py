@@ -71,9 +71,10 @@ async def scrape_url(
         
         if chunks:
             # Add user info to chunks
-            user_id = current_user.get("sub", "unknown")
+            creator_id = current_user.get("id")
             for chunk in chunks:
-                chunk["created_by_user_id"] = user_id if user_id != "unknown" else None
+                chunk["created_by_user_id"] = creator_id
+                chunk["receptionist_id"] = request.receptionist_id
             
             # Insert chunks into database
             result = supabase.table("chunks").insert(chunks).execute()

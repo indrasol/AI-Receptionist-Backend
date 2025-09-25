@@ -9,6 +9,7 @@ class UrlScrapeRequest(BaseModel):
     max_depth: Optional[int] = 3  # Maximum depth for subdomain/sub-URL scraping
     include_subdomains: Optional[bool] = True
     include_subpages: Optional[bool] = True
+    receptionist_id: Optional[str] = None  # UUID as string
 
 
 class ScrapedContent(BaseModel):

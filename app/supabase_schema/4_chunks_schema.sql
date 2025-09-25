@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     bullets JSONB, -- Array of 3-8 crisp bullets distilled from the content
     sample_questions JSONB, -- Array of 3-7 likely questions users would ask
     is_attached_to_assistant BOOLEAN DEFAULT FALSE, -- Toggle for UI - once we get query tool we need to attach to assistant
+    receptionist_id UUID REFERENCES receptionists(id) ON DELETE CASCADE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     created_by_user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL
@@ -24,6 +25,7 @@ CREATE INDEX IF NOT EXISTS idx_chunks_source_id ON chunks(source_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_is_attached_to_assistant ON chunks(is_attached_to_assistant);
 CREATE INDEX IF NOT EXISTS idx_chunks_created_at ON chunks(created_at);
 CREATE INDEX IF NOT EXISTS idx_chunks_created_by_user_id ON chunks(created_by_user_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_receptionist_id ON chunks(receptionist_id);
 
 -- Create composite index for organization + source type queries
 CREATE INDEX IF NOT EXISTS idx_chunks_org_source_type ON chunks(organization_id, source_type);
@@ -58,3 +60,4 @@ COMMENT ON COLUMN chunks.is_attached_to_assistant IS 'Toggle for UI - whether ch
 COMMENT ON COLUMN chunks.created_at IS 'Timestamp when chunk was created';
 COMMENT ON COLUMN chunks.updated_at IS 'Timestamp when chunk was last updated';
 COMMENT ON COLUMN chunks.created_by_user_id IS 'User who created this chunk';
+COMMENT ON COLUMN chunks.receptionist_id IS 'Receptionist this chunk is linked to';

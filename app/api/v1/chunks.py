@@ -196,6 +196,7 @@ async def create_chunks_bulk(
         for chunk in bulk_data.chunks:
             chunk_dict = chunk.model_dump()
             chunk_dict["organization_id"] = organization_id
+            chunk_dict["receptionist_id"] = bulk_data.receptionist_id
             chunk_dict["created_by_user_id"] = current_user.get("id")
             chunks_data.append(chunk_dict)
         
