@@ -67,7 +67,9 @@ jobs:
             --file Dockerfile \
             .
 
-      # 6) Deploy the new image to Azure Web App
+    # (Python migration runner removed)
+
+      # 9) Deploy the new image to Azure Web App
       - name: "Deploy to Azure Web App / slot"
         uses: azure/webapps-deploy@v3
         with:

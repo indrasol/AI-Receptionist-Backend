@@ -23,6 +23,7 @@ async def get_chunks(
     page_size: int = Query(20, ge=1, le=100, description="Number of items per page"),
     source_type: Optional[str] = Query(None, description="Filter by source type"),
     is_attached_to_assistant: Optional[bool] = Query(None, description="Filter by attachment status"),
+    receptionist_id: Optional[str] = Query(None, description="Filter by receptionist"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -50,6 +51,9 @@ async def get_chunks(
             query = query.eq("source_type", source_type)
         if is_attached_to_assistant is not None:
             query = query.eq("is_attached_to_assistant", is_attached_to_assistant)
+
+        if receptionist_id:
+            query = query.eq("receptionist_id", receptionist_id)
         
         # Apply pagination
         offset = (page - 1) * page_size
@@ -196,6 +200,7 @@ async def create_chunks_bulk(
         for chunk in bulk_data.chunks:
             chunk_dict = chunk.model_dump()
             chunk_dict["organization_id"] = organization_id
+            chunk_dict["receptionist_id"] = bulk_data.receptionist_id
             chunk_dict["created_by_user_id"] = current_user.get("id")
             chunks_data.append(chunk_dict)
         

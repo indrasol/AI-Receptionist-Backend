@@ -71,13 +71,22 @@ async def scrape_url(
         
         if chunks:
             # Add user info to chunks
-            user_id = current_user.get("sub", "unknown")
+            creator_id = current_user.get("id")
             for chunk in chunks:
-                chunk["created_by_user_id"] = user_id if user_id != "unknown" else None
+                chunk["created_by_user_id"] = creator_id
+                chunk["receptionist_id"] = request.receptionist_id
             
             # Insert chunks into database
             result = supabase.table("chunks").insert(chunks).execute()
             saved_chunks = result.data if result.data else []
+
+        # sync assistant prompt
+        from app.services.vapi_assistant import sync_assistant_prompt
+        if request.receptionist_id:
+            rec_row = supabase.table("receptionists").select("assistant_id").eq("id", request.receptionist_id).single().execute()
+            assistant_id = rec_row.data.get("assistant_id") if rec_row.data else None
+            if assistant_id:
+                await sync_assistant_prompt(assistant_id, request.receptionist_id)
         
         processing_time = time.time() - start_time
         

@@ -144,20 +144,66 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         if not result["valid"]:
             raise HTTPException(status_code=401, detail=result["message"])
         
-        # Return user claims from token
+        # Base claims
         claims = result["claims"]
+
+        email = claims.get("email")
+        profile = None
+        try:
+            from app.database_operations import get_supabase_client  # local import to avoid circular
+            supa = get_supabase_client()
+            prof_res = supa.table("profiles").select("first_name,last_name,organization_name,user_id").eq("email", email).single().execute()
+            profile = prof_res.data if prof_res.data else None
+        except Exception as e:
+            logger.warning(f"/auth/me profile lookup failed: {e}")
+
         return {
-            "user_id": claims.get("sub"),
-            "email": claims.get("email"),
-            "username": claims.get("user_metadata", {}).get("username"),
-            "first_name": claims.get("user_metadata", {}).get("first_name"),
-            "last_name": claims.get("user_metadata", {}).get("last_name"),
+            "user_id": profile.get("user_id") if profile else claims.get("sub"),
+            "email": email,
+            "first_name": profile.get("first_name") if profile else None,
+            "last_name": profile.get("last_name") if profile else None,
+            "organization_name": profile.get("organization_name") if profile else None,
             "exp": claims.get("exp"),
-            "iat": claims.get("iat")
+            "iat": claims.get("iat"),
         }
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Get current user error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error") 
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ---------------------------------------------------------------------
+# OTP signup endpoints
+# ---------------------------------------------------------------------
+
+
+from app.schemas.auth import OtpRequest, OtpVerifyRequest, GenericMessage, TokenResponse  # noqa: E402
+
+
+@router.post("/otp/request", response_model=GenericMessage, tags=["authentication"])
+async def request_email_otp(payload: OtpRequest):
+    """Generate a 6-digit OTP and email it to the user."""
+    try:
+        await auth_service.create_and_mail_otp(payload.email, payload.dict())
+        return {"message": "OTP sent"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"OTP request error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error during OTP request")
+
+
+@router.post("/otp/verify", response_model=TokenResponse, tags=["authentication"])
+async def verify_email_otp(payload: OtpVerifyRequest):
+    """Verify the 6-digit OTP provided by the user."""
+    try:
+        token_data = await auth_service.verify_otp_and_signup(payload.email, payload.otp)
+        token_data["message"] = "OTP verified"
+        return token_data
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"OTP verify error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error during OTP verification") 

@@ -1,5 +1,5 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends, Header
-from app.schemas.lead import Lead, LeadResponse, LeadList, LeadDB, GoogleSheetsResponse, LeadIdRequest, CallLeadResponse, CallLeadsRequest, CallLeadsResponse, VapiVoicesResponse, VapiVoiceIdResponse, VapiBackendVoiceResponse
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends, Header, Query
+from app.schemas.lead import Lead, LeadResponse, LeadList, LeadDB, GoogleSheetsResponse, LeadIdRequest, CallLeadResponse, CallLeadsRequest, CallLeadsResponse, VapiVoiceIdResponse, VapiBackendVoiceResponse
 from app.utils.auth import get_current_user
 import logging
 import pandas as pd
@@ -10,7 +10,10 @@ import os
 from datetime import datetime
 from app.database import get_supabase_client
 from app.config.settings import VAPI_WEBHOOK_SECRET
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
+from pydantic import BaseModel
+import httpx
+import os
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Outbound Management"])
@@ -388,7 +391,10 @@ async def upload_excel(
 
 
 @router.get("/get_leads", response_model=List[LeadDB])
-async def get_leads(current_user: dict = Depends(get_current_user)):
+async def get_leads(
+    receptionist_id: Optional[str] = Query(None, description="Filter by receptionist"),
+    current_user: dict = Depends(get_current_user),
+):
     """
     Get leads created by the current authenticated user
     
@@ -459,8 +465,20 @@ async def get_leads(current_user: dict = Depends(get_current_user)):
             )
         
         logger.info(f"Fetching leads for organization: {user_organization.get('name', 'Unknown')}")
-        # Filter leads by the user's organization
-        result = supabase.table(table_name).select("*").eq("organization_id", organization_id).order("created_at", desc=True).execute()
+        # Base query filtered by organization
+        query = supabase.table(table_name).select("*")
+
+        # Map receptionist_id -> assistant_id for filtering outbound calls
+        if receptionist_id:
+            rec_resp = supabase.table("receptionists").select("assistant_id").eq("id", receptionist_id).execute()
+            assistant_id = rec_resp.data[0]["assistant_id"] if rec_resp.data else None
+            if assistant_id:
+                query = query.eq("assistant_id", assistant_id)
+            else:
+                # No assistant for given receptionist, return empty list early
+                return []
+
+        result = query.order("created_at", desc=True).execute()
         
         # Check and update leads with missing VAPI call data
         updated_leads = []
@@ -1058,239 +1076,6 @@ async def fetch_vapi_call_data(vapi_call_id: str) -> dict:
         raise HTTPException(status_code=500, detail=f"Failed to fetch VAPI call data: {str(e)}")
 
 
-@router.get("/get_assistants", response_model=VapiVoicesResponse)
-async def get_assistants(current_user: dict = Depends(get_current_user)):
-    """
-    Get list of available voice agents with their properties
-    
-    **Authentication Required**: Include `Authorization: Bearer <token>` header
-    
-    **Returns:**
-    - List of voice agents with properties like name, age, gender, accent, tone, personality
-    
-    **Raises:**
-    - None (returns predefined data)
-
-    Example Response:
-    {
-    "message": "Successfully fetched 10 voice agents",
-    "voices": [
-        {
-            "display_name": "Alex",
-            "age": "22",
-            "gender": "male",
-            "ethnicity": "white",
-            "tone": "deeper tone",
-            "personality": [
-                "calming",
-                "professional"
-            ],
-            "description": "22 year old white male with deeper tone, calming and professional"
-        },
-        {
-            "display_name": "Maya",
-            "age": "24",
-            "gender": "male",
-            "ethnicity": "white",
-            "tone": "clear",
-            "personality": [
-                "energetic",
-                "professional"
-            ],
-            "description": "24 year old white male, clear, energetic and professional"
-        },
-        {
-            "display_name": "Jordan",
-            "age": "26",
-            "gender": "female",
-            "tone": "energetic",
-            "personality": [
-                "quippy",
-                "lighthearted",
-                "cheeky",
-                "amused"
-            ],
-            "description": "26 year old female, energetic, quippy, lighthearted, cheeky and amused"
-        },
-        {
-            "display_name": "Priya",
-            "age": "30",
-            "gender": "female",
-            "ethnicity": "indian",
-            "personality": [
-                "professional",
-                "charming"
-            ],
-            "description": "30 year old Indian female, professional and charming"
-        },
-        {
-            "display_name": "Emma",
-            "age": "23",
-            "gender": "female",
-            "ethnicity": "american",
-            "description": "23 year old American female"
-        },
-        {
-            "display_name": "Grace",
-            "age": "25",
-            "gender": "female",
-            "ethnicity": "american",
-            "accent": "southern accent",
-            "description": "25 years old American female with southern accent"
-        },
-        {
-            "display_name": "Sophie",
-            "age": "26",
-            "gender": "female",
-            "ethnicity": "white",
-            "tone": "deeper tone",
-            "personality": [
-                "calming",
-                "professional"
-            ],
-            "description": "26 year old white female, deeper tone, calming and professional"
-        },
-        {
-            "display_name": "Arjun",
-            "age": "24",
-            "gender": "male",
-            "ethnicity": "indian american",
-            "personality": [
-                "bright",
-                "optimistic",
-                "cheerful",
-                "energetic"
-            ],
-            "description": "24 years old Indian American male, bright, optimistic, cheerful and energetic"
-        },
-        {
-            "display_name": "Luna",
-            "age": "22",
-            "gender": "female",
-            "ethnicity": "asian",
-            "personality": [
-                "soft",
-                "soothing",
-                "gentle"
-            ],
-            "description": "22 years old Asian female, soft, soothing and gentle"
-        },
-        {
-            "display_name": "Max",
-            "age": "25",
-            "gender": "male",
-            "ethnicity": "canadian",
-            "personality": [
-                "soothing",
-                "friendly",
-                "professional"
-            ],
-            "description": "25 years old Canadian male, soothing, friendly and professional"
-        }
-    ],
-    "total_count": 10
-}
-
-    """
-    try:
-        voice_agents = [
-            {
-                "display_name": "Alex",
-                "age": "22",
-                "gender": "male",
-                "ethnicity": "white",
-                "tone": "deeper tone",
-                "personality": ["calming", "professional"],
-                "description": "22 year old white male with deeper tone, calming and professional"
-            },
-            {
-                "display_name": "Maya",
-                "age": "24",
-                "gender": "male",
-                "ethnicity": "white",
-                "tone": "clear",
-                "personality": ["energetic", "professional"],
-                "description": "24 year old white male, clear, energetic and professional"
-            },
-            {
-                "display_name": "Jordan",
-                "age": "26",
-                "gender": "female",
-                "tone": "energetic",
-                "personality": ["quippy", "lighthearted", "cheeky", "amused"],
-                "description": "26 year old female, energetic, quippy, lighthearted, cheeky and amused"
-            },
-            {
-                "display_name": "Priya",
-                "age": "30",
-                "gender": "female",
-                "ethnicity": "indian",
-                "personality": ["professional", "charming"],
-                "description": "30 year old Indian female, professional and charming"
-            },
-            {
-                "display_name": "Emma",
-                "age": "23",
-                "gender": "female",
-                "ethnicity": "american",
-                "description": "23 year old American female"
-            },
-            {
-                "display_name": "Grace",
-                "age": "25",
-                "gender": "female",
-                "ethnicity": "american",
-                "accent": "southern accent",
-                "description": "25 years old American female with southern accent"
-            },
-            {
-                "display_name": "Sophie",
-                "age": "26",
-                "gender": "female",
-                "ethnicity": "white",
-                "tone": "deeper tone",
-                "personality": ["calming", "professional"],
-                "description": "26 year old white female, deeper tone, calming and professional"
-            },
-            {
-                "display_name": "Arjun",
-                "age": "24",
-                "gender": "male",
-                "ethnicity": "indian american",
-                "personality": ["bright", "optimistic", "cheerful", "energetic"],
-                "description": "24 years old Indian American male, bright, optimistic, cheerful and energetic"
-            },
-            {
-                "display_name": "Luna",
-                "age": "22",
-                "gender": "female",
-                "ethnicity": "asian",
-                "personality": ["soft", "soothing", "gentle"],
-                "description": "22 years old Asian female, soft, soothing and gentle"
-            },
-            {
-                "display_name": "Max",
-                "age": "25",
-                "gender": "male",
-                "ethnicity": "canadian",
-                "personality": ["soothing", "friendly", "professional"],
-                "description": "25 years old Canadian male, soothing, friendly and professional"
-            }
-        ]
-        
-        logger.info(f"User {current_user.get('email', 'unknown')} fetched voice agents list")
-        
-        return {
-            "message": f"Successfully fetched {len(voice_agents)} voice agents",
-            "assistants": voice_agents,
-            "total_count": len(voice_agents)
-        }
-        
-    except Exception as e:
-        logger.error(f"Unexpected error fetching voice agents: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch voice agents: {str(e)}")
-
-
 # @router.get("/get_vapi_voice_id/{display_name}", response_model=VapiVoiceIdResponse)
 # async def get_vapi_voice_id(display_name: str, current_user: dict = Depends(get_current_user)):
 #     """
@@ -1694,5 +1479,86 @@ async def vapi_webhook(
             status_code=500,
             detail=f"Failed to process webhook: {str(e)}"
         )
+
+
+class CallNumberRequest(BaseModel):
+    receptionist_id: str
+    phone: str
+    first_name: str | None = None
+    last_name: str | None = None
+
+class CallNumberResponse(BaseModel):
+    message: str
+    vapi_call_id: str
+
+@router.post("/call_number", response_model=CallNumberResponse)
+async def call_number(
+    payload: CallNumberRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Trigger a single outbound call via Vapi and store/ update the lead record."""
+    supabase = get_supabase_client()
+
+    # Get receptionist row to obtain assistant_id
+    rec_resp = supabase.table("receptionists").select("assistant_id,name").eq("id", payload.receptionist_id).execute()
+    if not rec_resp.data:
+        raise HTTPException(status_code=404, detail="Receptionist not found")
+    assistant_id = rec_resp.data[0].get("assistant_id")
+    if not assistant_id:
+        raise HTTPException(status_code=400, detail="Receptionist has no assistant configured")
+
+    # fetch phone_number row for this assistant to get vapi_id
+    phone_row = supabase.table("phone_numbers").select("vapi_id").eq("assistant_id", assistant_id).single().execute()
+    phone_number_id = phone_row.data.get("vapi_id") if phone_row.data else None
+
+    if not phone_number_id:
+        raise HTTPException(status_code=400, detail="Assistant not linked to any phone number")
+
+    phone_e164 = payload.phone if payload.phone.startswith("+") else f"+1{payload.phone}"
+    full_name = (payload.first_name or "") + (f" {payload.last_name}" if payload.last_name else "")
+
+    print("phone_number_id", phone_number_id)
+    print("assistant_id", assistant_id)
+    print("phone_e164", phone_e164)
+    print("full_name", full_name)
+
+    vapi_payload = {
+        "assistantId": assistant_id,
+        "customer": {
+            "number": phone_e164,
+            "numberE164CheckEnabled": False
+        },
+        "phoneNumberId": phone_number_id
+    }
+    vapi_token = os.getenv("AI_RECEPTION_VAPI_AUTH_TOKEN")
+    if not vapi_token:
+        raise HTTPException(status_code=500, detail="Vapi auth token missing")
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        vapi_res = await client.post(
+            "https://api.vapi.ai/call/phone",
+            headers={"Authorization": f"Bearer {vapi_token}", "Content-Type": "application/json"},
+            json=vapi_payload,
+        )
+        if not 200 <= vapi_res.status_code < 300:
+            raise HTTPException(status_code=500, detail=f"Vapi error: {vapi_res.text}")
+        vapi_data = vapi_res.json()
+        call_id = vapi_data.get("id")
+
+    # Upsert lead
+    lead_table = "ai_receptionist_leads"
+    lead_data = {
+        "first_name": payload.first_name,
+        "last_name": payload.last_name,
+        "phone_number": payload.phone,
+        "assistant_id": assistant_id,
+        "source": "quick_call",
+        "import_source": "quick_call",
+        "vapi_call_id": call_id,
+        "call_status": "initiated",
+    }
+    supabase.table(lead_table).insert(lead_data).execute()
+
+    return CallNumberResponse(message="Call initiated", vapi_call_id=call_id)
 
 

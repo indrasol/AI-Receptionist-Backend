@@ -4,7 +4,7 @@ from typing import List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 
-from app.schemas.document import DocumentUploadResponse, DocumentInfo, DocumentChunkResponse
+from app.schemas.document import DocumentUploadResponse, DocumentInfo, DocumentChunkResponse, TextInputRequest
 from app.services.document_service import DocumentProcessingService
 from app.services.openai_service import OpenAIService
 from app.utils.auth import get_current_user
@@ -15,12 +15,6 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# Pydantic model for text input
-class TextInputRequest(BaseModel):
-    text: str
-    name: str = "Text Content"
-    description: str = "Content extracted from text input"
 
 # Response model for text processing
 class TextProcessingResponse(BaseModel):
@@ -109,6 +103,7 @@ async def process_document(
             chunk["source_type"] = "file"  # Use "file" instead of "document" to match schema
             chunk["source_id"] = document_result['filename']
             chunk["created_by_user_id"] = user_id if user_id != "unknown" else None
+            chunk["receptionist_id"] = None  # pass through later
         
         # Save chunks to database
         try:
@@ -241,6 +236,7 @@ async def get_supported_formats():
             chunk["source_type"] = "document"
             chunk["source_id"] = document_result['filename']
             chunk["created_by_user_id"] = "test-user-id"
+            chunk["receptionist_id"] = None # pass through later
         
         # Calculate processing time
         processing_time = time.time() - start_time
@@ -372,6 +368,7 @@ async def process_text(
             chunk["source_type"] = "text"  # Use "text" for direct text input
             chunk["source_id"] = f"text://{request.name}"
             chunk["created_by_user_id"] = user_id if user_id != "unknown" else None
+            chunk["receptionist_id"] = request.receptionist_id if hasattr(request, "receptionist_id") else None
         
         # Save chunks to database
         try:

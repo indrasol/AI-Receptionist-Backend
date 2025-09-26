@@ -24,6 +24,7 @@ class ChunkBase(BaseModel):
 class ChunkCreate(ChunkBase):
     """Schema for creating a new chunk"""
     organization_id: UUID = Field(..., description="Organization that owns this chunk")
+    receptionist_id: Optional[UUID] = Field(None, description="Receptionist this chunk is linked to")
 
 class ChunkUpdate(BaseModel):
     """Schema for updating a chunk"""
@@ -33,6 +34,7 @@ class ChunkUpdate(BaseModel):
     bullets: Optional[List[str]] = Field(None, description="Array of key bullet points extracted from content")
     sample_questions: Optional[List[str]] = Field(None, description="Array of sample questions this chunk can answer")
     is_attached_to_assistant: Optional[bool] = Field(None, description="Toggle for UI - whether chunk is attached to AI assistant")
+    receptionist_id: Optional[UUID] = Field(None, description="Receptionist this chunk is linked to")
 
 class ChunkDB(ChunkBase):
     """Schema for chunk as stored in database"""
@@ -41,6 +43,7 @@ class ChunkDB(ChunkBase):
     created_at: datetime = Field(..., description="Timestamp when chunk was created")
     updated_at: datetime = Field(..., description="Timestamp when chunk was last updated")
     created_by_user_id: Optional[UUID] = Field(None, description="User who created this chunk")
+    receptionist_id: Optional[UUID] = Field(None, description="Receptionist this chunk is linked to")
 
     class Config:
         from_attributes = True
