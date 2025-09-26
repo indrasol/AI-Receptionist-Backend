@@ -11,6 +11,9 @@ from datetime import datetime
 from app.database import get_supabase_client
 from app.config.settings import VAPI_WEBHOOK_SECRET
 from typing import List, Tuple, Dict, Any, Optional
+from pydantic import BaseModel
+import httpx
+import os
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Outbound Management"])
@@ -1476,5 +1479,86 @@ async def vapi_webhook(
             status_code=500,
             detail=f"Failed to process webhook: {str(e)}"
         )
+
+
+class CallNumberRequest(BaseModel):
+    receptionist_id: str
+    phone: str
+    first_name: str | None = None
+    last_name: str | None = None
+
+class CallNumberResponse(BaseModel):
+    message: str
+    vapi_call_id: str
+
+@router.post("/call_number", response_model=CallNumberResponse)
+async def call_number(
+    payload: CallNumberRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Trigger a single outbound call via Vapi and store/ update the lead record."""
+    supabase = get_supabase_client()
+
+    # Get receptionist row to obtain assistant_id
+    rec_resp = supabase.table("receptionists").select("assistant_id,name").eq("id", payload.receptionist_id).execute()
+    if not rec_resp.data:
+        raise HTTPException(status_code=404, detail="Receptionist not found")
+    assistant_id = rec_resp.data[0].get("assistant_id")
+    if not assistant_id:
+        raise HTTPException(status_code=400, detail="Receptionist has no assistant configured")
+
+    # fetch phone_number row for this assistant to get vapi_id
+    phone_row = supabase.table("phone_numbers").select("vapi_id").eq("assistant_id", assistant_id).single().execute()
+    phone_number_id = phone_row.data.get("vapi_id") if phone_row.data else None
+
+    if not phone_number_id:
+        raise HTTPException(status_code=400, detail="Assistant not linked to any phone number")
+
+    phone_e164 = payload.phone if payload.phone.startswith("+") else f"+1{payload.phone}"
+    full_name = (payload.first_name or "") + (f" {payload.last_name}" if payload.last_name else "")
+
+    print("phone_number_id", phone_number_id)
+    print("assistant_id", assistant_id)
+    print("phone_e164", phone_e164)
+    print("full_name", full_name)
+
+    vapi_payload = {
+        "assistantId": assistant_id,
+        "customer": {
+            "number": phone_e164,
+            "numberE164CheckEnabled": False
+        },
+        "phoneNumberId": phone_number_id
+    }
+    vapi_token = os.getenv("AI_RECEPTION_VAPI_AUTH_TOKEN")
+    if not vapi_token:
+        raise HTTPException(status_code=500, detail="Vapi auth token missing")
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        vapi_res = await client.post(
+            "https://api.vapi.ai/call/phone",
+            headers={"Authorization": f"Bearer {vapi_token}", "Content-Type": "application/json"},
+            json=vapi_payload,
+        )
+        if not 200 <= vapi_res.status_code < 300:
+            raise HTTPException(status_code=500, detail=f"Vapi error: {vapi_res.text}")
+        vapi_data = vapi_res.json()
+        call_id = vapi_data.get("id")
+
+    # Upsert lead
+    lead_table = "ai_receptionist_leads"
+    lead_data = {
+        "first_name": payload.first_name,
+        "last_name": payload.last_name,
+        "phone_number": payload.phone,
+        "assistant_id": assistant_id,
+        "source": "quick_call",
+        "import_source": "quick_call",
+        "vapi_call_id": call_id,
+        "call_status": "initiated",
+    }
+    supabase.table(lead_table).insert(lead_data).execute()
+
+    return CallNumberResponse(message="Call initiated", vapi_call_id=call_id)
 
 
