@@ -3,10 +3,10 @@ Inbound Calls Management API
 Handles all inbound call operations including retrieval and management
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from app.utils.auth import get_current_user
 from app.database_operations import get_inbound_calls_by_user_organization
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
 import requests
 from app.config.settings import DEBUG,VAPI_AUTH_TOKEN
@@ -18,7 +18,12 @@ router = APIRouter(tags=["Inbound Calls Management"])
 
 
 @router.get("/get_calls", response_model=List[Dict[str, Any]])
-async def get_inbound_calls(current_user: dict = Depends(get_current_user)):
+async def get_inbound_calls(
+    receptionist_id: Optional[str] = Query(None, description="Filter by receptionist"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    current_user: dict = Depends(get_current_user),
+):
     """
     Get all inbound calls for the current user's organization
     
@@ -74,15 +79,35 @@ async def get_inbound_calls(current_user: dict = Depends(get_current_user)):
         
         logger.info(f"Fetching inbound calls for organization: {user_organization.get('name', 'Unknown')}")
         
-        # Get inbound calls for the user's organization
-        inbound_calls = await get_inbound_calls_by_user_organization(current_user.get("sub"))
+        supabase = get_supabase_client()
+
+        # Query calls table directly
+        query = supabase.table("ai_receptionist_inbound_calls").select("*")
+
+        # If receptionist_id provided, translate to assistant_id
+        if receptionist_id:
+            rec_resp = supabase.table("receptionists").select("assistant_id").eq("id", receptionist_id).execute()
+            assistant_id = rec_resp.data[0]["assistant_id"] if rec_resp.data else None
+            if assistant_id:
+                query = query.eq("assistant_id", assistant_id)
+            else:
+                # No assistant found for this receptionist, return empty list early
+                return []
+
+        # pagination
+        offset = (page - 1) * page_size
+        query = query.range(offset, offset + page_size - 1)
+
+        result = query.order("created_at", desc=True).execute()
+
+        inbound_calls = result.data or []
         
         if not inbound_calls:
             logger.info(f"No inbound calls found for organization: {user_organization.get('name')}")
             return []
         
         # Sort by created_at (newest first)
-        sorted_calls = sorted(inbound_calls, key=lambda x: x.get("created_at", ""), reverse=True)
+        sorted_calls = inbound_calls  # already ordered
         
         # Add call_date and call_duration_formatted fields to each call
         for call in sorted_calls:

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends, Header
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends, Header, Query
 from app.schemas.lead import Lead, LeadResponse, LeadList, LeadDB, GoogleSheetsResponse, LeadIdRequest, CallLeadResponse, CallLeadsRequest, CallLeadsResponse, VapiVoiceIdResponse, VapiBackendVoiceResponse
 from app.utils.auth import get_current_user
 import logging
@@ -10,7 +10,7 @@ import os
 from datetime import datetime
 from app.database import get_supabase_client
 from app.config.settings import VAPI_WEBHOOK_SECRET
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Outbound Management"])
@@ -388,7 +388,10 @@ async def upload_excel(
 
 
 @router.get("/get_leads", response_model=List[LeadDB])
-async def get_leads(current_user: dict = Depends(get_current_user)):
+async def get_leads(
+    receptionist_id: Optional[str] = Query(None, description="Filter by receptionist"),
+    current_user: dict = Depends(get_current_user),
+):
     """
     Get leads created by the current authenticated user
     
@@ -459,8 +462,20 @@ async def get_leads(current_user: dict = Depends(get_current_user)):
             )
         
         logger.info(f"Fetching leads for organization: {user_organization.get('name', 'Unknown')}")
-        # Filter leads by the user's organization
-        result = supabase.table(table_name).select("*").eq("organization_id", organization_id).order("created_at", desc=True).execute()
+        # Base query filtered by organization
+        query = supabase.table(table_name).select("*")
+
+        # Map receptionist_id -> assistant_id for filtering outbound calls
+        if receptionist_id:
+            rec_resp = supabase.table("receptionists").select("assistant_id").eq("id", receptionist_id).execute()
+            assistant_id = rec_resp.data[0]["assistant_id"] if rec_resp.data else None
+            if assistant_id:
+                query = query.eq("assistant_id", assistant_id)
+            else:
+                # No assistant for given receptionist, return empty list early
+                return []
+
+        result = query.order("created_at", desc=True).execute()
         
         # Check and update leads with missing VAPI call data
         updated_leads = []
