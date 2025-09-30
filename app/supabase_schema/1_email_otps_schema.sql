@@ -1,9 +1,9 @@
--- Email OTPs table for storing one-time password hashes per e-mail
--- This supports the OTP signup flow implemented in app/services/auth_service.py
+-- Email OTPs table for storing user metadata during OTP signup/login flow
+-- OTP verification is now handled by Supabase Auth, this table stores metadata only
 
 CREATE TABLE IF NOT EXISTS email_otps (
     email TEXT PRIMARY KEY,                       -- E-mail address requesting the OTP
-    otp_hash TEXT NOT NULL,                       -- SHA-256 hash of the 6-digit code
+    otp_hash TEXT,                                -- Deprecated: OTP hash storage moved to Supabase Auth
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL, -- Expiration timestamp (UTC)
     -- Optional metadata captured during signup flow
     organization_name TEXT,
