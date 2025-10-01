@@ -121,6 +121,19 @@ async def process_document(
             logger.error(f"Failed to save chunks to database: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Failed to save chunks to database: {str(e)}")
         
+        # Sync assistant prompt with new knowledge
+        from app.services.vapi_assistant import sync_assistant_prompt
+        if receptionist_id:
+            try:
+                rec_row = supabase.table("receptionists").select("assistant_id").eq("id", receptionist_id).single().execute()
+                assistant_id = rec_row.data.get("assistant_id") if rec_row.data else None
+                if assistant_id:
+                    await sync_assistant_prompt(assistant_id, receptionist_id)
+                    logger.info(f"Successfully synced VAPI assistant {assistant_id} with new document knowledge")
+            except Exception as sync_error:
+                logger.warning(f"Failed to sync VAPI assistant prompt: {str(sync_error)}")
+                # Don't fail the request if sync fails - chunks are already saved
+        
         # Calculate processing time
         processing_time = time.time() - start_time
         
@@ -387,6 +400,20 @@ async def process_text(
             logger.error(f"Failed to save chunks to database: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Failed to save chunks to database: {str(e)}")
         
+        # Sync assistant prompt with new knowledge
+        from app.services.vapi_assistant import sync_assistant_prompt
+        receptionist_id = request.receptionist_id if hasattr(request, "receptionist_id") else None
+        if receptionist_id:
+            try:
+                rec_row = supabase.table("receptionists").select("assistant_id").eq("id", receptionist_id).single().execute()
+                assistant_id = rec_row.data.get("assistant_id") if rec_row.data else None
+                if assistant_id:
+                    await sync_assistant_prompt(assistant_id, receptionist_id)
+                    logger.info(f"Successfully synced VAPI assistant {assistant_id} with new text knowledge")
+            except Exception as sync_error:
+                logger.warning(f"Failed to sync VAPI assistant prompt: {str(sync_error)}")
+                # Don't fail the request if sync fails - chunks are already saved
+        
         # Calculate processing time
         processing_time = time.time() - start_time
         
@@ -467,6 +494,20 @@ async def process_text_simple(
         except Exception as e:
             logger.error(f"Failed to save chunk to database: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Failed to save chunk to database: {str(e)}")
+        
+        # Sync assistant prompt with new knowledge
+        from app.services.vapi_assistant import sync_assistant_prompt
+        receptionist_id = request.receptionist_id if hasattr(request, "receptionist_id") else None
+        if receptionist_id:
+            try:
+                rec_row = supabase.table("receptionists").select("assistant_id").eq("id", receptionist_id).single().execute()
+                assistant_id = rec_row.data.get("assistant_id") if rec_row.data else None
+                if assistant_id:
+                    await sync_assistant_prompt(assistant_id, receptionist_id)
+                    logger.info(f"Successfully synced VAPI assistant {assistant_id} with new simple text knowledge")
+            except Exception as sync_error:
+                logger.warning(f"Failed to sync VAPI assistant prompt: {str(sync_error)}")
+                # Don't fail the request if sync fails - chunks are already saved
         
         # Calculate processing time
         processing_time = time.time() - start_time
