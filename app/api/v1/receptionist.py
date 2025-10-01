@@ -533,6 +533,37 @@ async def get_receptionists(current_user: dict = Depends(get_current_user)):
         logger.error(f"Unexpected error fetching receptionists: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch receptionists: {str(e)}")
 
+@router.get("/{receptionist_id}", response_model=ReceptionistResponse)
+async def get_receptionist_by_id(receptionist_id: str, current_user: dict = Depends(get_current_user)):
+    """Get a specific receptionist by ID with organization validation."""
+    try:
+        org_id = current_user.get("organization", {}).get("id")
+        if not org_id:
+            raise HTTPException(status_code=400, detail="User does not belong to any organization")
+
+        supabase = get_supabase_client()
+        res = (
+            supabase.table("receptionists")
+            .select("*")
+            .eq("id", receptionist_id)
+            .eq("org_id", org_id)
+            .eq("is_deleted", False)
+            .single()
+            .execute()
+        )
+
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Receptionist not found or access denied")
+
+        logger.info(f"Successfully fetched receptionist {receptionist_id} for organization {org_id}")
+        return ReceptionistResponse(**res.data)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error fetching receptionist {receptionist_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch receptionist: {str(e)}")
+
 class ReceptionistUpdateRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None

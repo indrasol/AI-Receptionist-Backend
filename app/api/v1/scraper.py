@@ -71,9 +71,9 @@ async def scrape_url(
         
         if chunks:
             # Add user info to chunks
-            creator_id = current_user.get("id")
+            # Skip user tracking for now due to foreign key constraint
             for chunk in chunks:
-                chunk["created_by_user_id"] = creator_id
+                chunk["created_by_user_id"] = None
                 chunk["receptionist_id"] = request.receptionist_id
             
             # Insert chunks into database

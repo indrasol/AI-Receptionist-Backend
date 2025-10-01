@@ -87,40 +87,39 @@ For the single chunk, provide:
 
 IMPORTANT: Create only ONE chunk that contains ALL the information from the website. Do not split into multiple chunks.
 
-Format your response as a JSON array with this exact structure:
-[
-  {{
-    "name": "Complete Website Overview",
-    "description": "Comprehensive information about all aspects of this website",
-    "content": "Complete comprehensive content covering all aspects of the website including services, contact information, company details, locations, partnerships, and all other relevant information...",
-    "bullets": [
-      "Bullet point 1 covering key aspect",
-      "Bullet point 2 covering another important aspect",
-      "Bullet point 3 covering services",
-      "Bullet point 4 covering contact information",
-      "Bullet point 5 covering company details",
-      "... up to 15 bullet points covering all important aspects"
-    ],
-    "sample_questions": [
-      "Question 1 about services",
-      "Question 2 about contact information",
-      "Question 3 about company details",
-      "Question 4 about locations",
-      "Question 5 about partnerships",
-      "... up to 15 questions covering all topics"
-    ]
-  }}
-]
+Format your response as a JSON object with this exact structure:
+{{
+  "name": "Complete Website Overview",
+  "description": "Comprehensive information about all aspects of this website",
+  "content": "Complete comprehensive content covering all aspects of the website including services, contact information, company details, locations, partnerships, and all other relevant information...",
+  "bullets": [
+    "Bullet point 1 covering key aspect",
+    "Bullet point 2 covering another important aspect",
+    "Bullet point 3 covering services",
+    "Bullet point 4 covering contact information",
+    "Bullet point 5 covering company details",
+    "... up to 15 bullet points covering all important aspects"
+  ],
+  "sample_questions": [
+    "Question 1 about services",
+    "Question 2 about contact information",
+    "Question 3 about company details",
+    "Question 4 about locations",
+    "Question 5 about partnerships",
+    "... up to 15 questions covering all topics"
+  ]
+}}
 
 Make sure the single chunk is comprehensive, useful, and contains all actionable information from the website. Include all important details in one complete chunk.
 
-IMPORTANT: You must respond with ONLY a valid JSON array containing exactly ONE chunk. Do not include any text before or after the JSON. RESPOND WITH ONLY THE JSON ARRAY - NO ADDITIONAL TEXT.
+IMPORTANT: You must respond with ONLY a valid JSON object. Do not include any text before or after the JSON. RESPOND WITH ONLY THE JSON OBJECT - NO ADDITIONAL TEXT.
 """
         return prompt
     
     async def _call_openai_api(self, prompt: str) -> str:
         """Call OpenAI API with the prompt"""
         try:
+            # Use response_format to ensure JSON output
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",  # Using the more cost-effective model
                 messages=[
@@ -135,13 +134,22 @@ IMPORTANT: You must respond with ONLY a valid JSON array containing exactly ONE 
                 ],
                 max_tokens=4000,
                 temperature=0.3,  # Lower temperature for more consistent results
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"}  # Force JSON response
             )
             
-            return response.choices[0].message.content
+            # Safely extract the content
+            content = response.choices[0].message.content
+            
+            # Convert response to dict to avoid Pydantic issues
+            if content is None:
+                logger.error("OpenAI returned None content")
+                raise ValueError("OpenAI API returned empty content")
+            
+            return str(content)
             
         except Exception as e:
             logger.error(f"OpenAI API call failed: {str(e)}")
+            logger.error(f"Error type: {type(e).__name__}")
             raise e
     
     def _parse_openai_response(
@@ -168,7 +176,7 @@ IMPORTANT: You must respond with ONLY a valid JSON array containing exactly ONE 
                 elif 'data' in parsed_response:
                     chunks_data = parsed_response['data']
                 else:
-                    # Assume the dict itself contains the chunks
+                    # Assume the dict itself contains the chunk data
                     chunks_data = [parsed_response]
             elif isinstance(parsed_response, list):
                 # If it's already a list, use it directly

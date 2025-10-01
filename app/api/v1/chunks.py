@@ -201,7 +201,7 @@ async def create_chunks_bulk(
             chunk_dict = chunk.model_dump()
             chunk_dict["organization_id"] = organization_id
             chunk_dict["receptionist_id"] = bulk_data.receptionist_id
-            chunk_dict["created_by_user_id"] = current_user.get("id")
+            chunk_dict["created_by_user_id"] = None  # Skip user tracking for now due to foreign key constraint
             chunks_data.append(chunk_dict)
         
         # Insert chunks

@@ -18,4 +18,6 @@ api_router.include_router(chunks.router, prefix="/chunks", tags=["Chunks Managem
 # Include document processing endpoints
 api_router.include_router(documents.router, prefix="/documents", tags=["Document Processing"])
 # Include receptionist creation endpoints
-api_router.include_router(receptionist.router, prefix="/create_receptionist", tags=["Receptionist Creation"]) 
+api_router.include_router(receptionist.router, prefix="/create_receptionist", tags=["Receptionist Creation"])
+# Include receptionist management endpoints
+api_router.include_router(receptionist.router, prefix="/receptionists", tags=["Receptionist Management"]) 
