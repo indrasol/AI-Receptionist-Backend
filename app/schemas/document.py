@@ -41,7 +41,6 @@ class DocumentChunkResponse(BaseModel):
     content: str
     bullets: List[str]
     sample_questions: List[str]
-    is_attached_to_assistant: bool = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     created_by_user_id: Optional[str] = None

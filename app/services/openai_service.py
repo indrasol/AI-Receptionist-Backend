@@ -197,8 +197,7 @@ IMPORTANT: You must respond with ONLY a valid JSON object. Do not include any te
                         "description": chunk_data.get("description", ""),
                         "content": chunk_data.get("content", ""),
                         "bullets": chunk_data.get("bullets", []),
-                        "sample_questions": chunk_data.get("sample_questions", []),
-                        "is_attached_to_assistant": False
+                        "sample_questions": chunk_data.get("sample_questions", [])
                     }
                     chunks.append(chunk)
             
