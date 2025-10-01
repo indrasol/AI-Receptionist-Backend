@@ -9,7 +9,8 @@ from uuid import UUID
 
 from app.schemas.chunk import (
     ChunkCreate, ChunkUpdate, ChunkResponse, ChunkListResponse,
-    ChunkBulkCreate, ChunkSearchRequest, ChunkSearchResponse
+    ChunkBulkCreate, ChunkSearchRequest, ChunkSearchResponse,
+    ChunkBatchToggleRequest, ChunkBatchToggleResponse
 )
 from app.utils.auth import get_current_user
 from app.database_operations import get_supabase_client
@@ -22,7 +23,6 @@ async def get_chunks(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Number of items per page"),
     source_type: Optional[str] = Query(None, description="Filter by source type"),
-    is_attached_to_assistant: Optional[bool] = Query(None, description="Filter by attachment status"),
     receptionist_id: Optional[str] = Query(None, description="Filter by receptionist"),
     current_user: dict = Depends(get_current_user)
 ):
@@ -32,7 +32,6 @@ async def get_chunks(
     - **page**: Page number (starts from 1)
     - **page_size**: Number of items per page (max 100)
     - **source_type**: Filter by source type (website, file, text)
-    - **is_attached_to_assistant**: Filter by attachment status
     """
     try:
         supabase = get_supabase_client()
@@ -45,12 +44,11 @@ async def get_chunks(
         # Build query
         query = supabase.table("chunks").select("*", count="exact")
         query = query.eq("organization_id", organization_id)
+        query = query.eq("deleted", False)  # Exclude deleted chunks
         
         # Apply filters
         if source_type:
             query = query.eq("source_type", source_type)
-        if is_attached_to_assistant is not None:
-            query = query.eq("is_attached_to_assistant", is_attached_to_assistant)
 
         if receptionist_id:
             query = query.eq("receptionist_id", receptionist_id)
@@ -121,7 +119,7 @@ async def update_chunk(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Update a chunk
+    Update a chunk and sync with VAPI if it has a vapi_file_id
     """
     try:
         supabase = get_supabase_client()
@@ -131,7 +129,13 @@ async def update_chunk(
         if not organization_id:
             raise HTTPException(status_code=400, detail="User has no organization")
         
-        # Update chunk
+        # Get existing chunk to check for vapi_file_id
+        existing = supabase.table("chunks").select("*").eq("id", chunk_id).eq("organization_id", organization_id).single().execute()
+        
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Chunk not found")
+        
+        # Update chunk in database
         update_data = {k: v for k, v in chunk_data.model_dump().items() if v is not None}
         
         result = supabase.table("chunks").update(update_data).eq("id", chunk_id).eq("organization_id", organization_id).execute()
@@ -139,8 +143,46 @@ async def update_chunk(
         if not result.data:
             raise HTTPException(status_code=404, detail="Chunk not found")
         
+        updated_chunk = result.data[0]
+        
+        # If chunk has vapi_file_id, we need to update the file in VAPI
+        vapi_file_id = existing.data.get("vapi_file_id")
+        if vapi_file_id:
+            try:
+                from app.services.vapi_assistant import delete_file_from_vapi, upload_chunk_to_vapi, sync_assistant_prompt
+                
+                # Delete old file from VAPI
+                await delete_file_from_vapi(vapi_file_id)
+                
+                # Upload new version to VAPI
+                new_vapi_file_id = await upload_chunk_to_vapi(
+                    str(chunk_id),
+                    updated_chunk.get('name', 'Unnamed Chunk'),
+                    updated_chunk.get('content', ''),
+                    bullets=updated_chunk.get('bullets', []),
+                    sample_questions=updated_chunk.get('sample_questions', [])
+                )
+                
+                # Update vapi_file_id in database
+                if new_vapi_file_id:
+                    supabase.table("chunks").update({"vapi_file_id": new_vapi_file_id}).eq("id", chunk_id).execute()
+                    updated_chunk['vapi_file_id'] = new_vapi_file_id
+                    logger.info(f"Updated VAPI file for chunk {chunk_id}")
+                    
+                    # Sync assistant if receptionist_id exists
+                    receptionist_id = updated_chunk.get('receptionist_id')
+                    if receptionist_id:
+                        rec_row = supabase.table("receptionists").select("assistant_id").eq("id", receptionist_id).single().execute()
+                        assistant_id = rec_row.data.get("assistant_id") if rec_row.data else None
+                        if assistant_id:
+                            await sync_assistant_prompt(assistant_id, receptionist_id)
+                            
+            except Exception as vapi_error:
+                logger.warning(f"Failed to update VAPI file: {str(vapi_error)}")
+                # Continue - database update was successful
+        
         logger.info(f"Updated chunk {chunk_id}")
-        return ChunkResponse(**result.data[0])
+        return ChunkResponse(**updated_chunk)
         
     except HTTPException:
         raise
@@ -154,7 +196,7 @@ async def delete_chunk(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Delete a chunk
+    Soft delete a chunk - marks it as deleted and removes from VAPI
     """
     try:
         supabase = get_supabase_client()
@@ -164,13 +206,47 @@ async def delete_chunk(
         if not organization_id:
             raise HTTPException(status_code=400, detail="User has no organization")
         
-        # Delete chunk
-        result = supabase.table("chunks").delete().eq("id", chunk_id).eq("organization_id", organization_id).execute()
+        # Get chunk to check for vapi_file_id
+        existing = supabase.table("chunks").select("*").eq("id", chunk_id).eq("organization_id", organization_id).single().execute()
+        
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Chunk not found")
+        
+        vapi_file_id = existing.data.get("vapi_file_id")
+        receptionist_id = existing.data.get("receptionist_id")
+        
+        # Delete file from VAPI if it exists
+        if vapi_file_id:
+            try:
+                from app.services.vapi_assistant import delete_file_from_vapi, sync_assistant_prompt
+                await delete_file_from_vapi(vapi_file_id)
+                logger.info(f"Deleted VAPI file {vapi_file_id} for chunk {chunk_id}")
+            except Exception as vapi_error:
+                logger.warning(f"Failed to delete VAPI file: {str(vapi_error)}")
+                # Continue with soft delete anyway
+        
+        # Soft delete: mark as deleted and clear vapi_file_id
+        result = supabase.table("chunks").update({
+            "deleted": True,
+            "vapi_file_id": None
+        }).eq("id", chunk_id).eq("organization_id", organization_id).execute()
         
         if not result.data:
             raise HTTPException(status_code=404, detail="Chunk not found")
         
-        logger.info(f"Deleted chunk {chunk_id}")
+        # Sync assistant to remove from knowledge base
+        if receptionist_id:
+            try:
+                from app.services.vapi_assistant import sync_assistant_prompt
+                rec_row = supabase.table("receptionists").select("assistant_id").eq("id", receptionist_id).single().execute()
+                assistant_id = rec_row.data.get("assistant_id") if rec_row.data else None
+                if assistant_id:
+                    await sync_assistant_prompt(assistant_id, receptionist_id)
+                    logger.info(f"Synced assistant after deleting chunk {chunk_id}")
+            except Exception as sync_error:
+                logger.warning(f"Failed to sync assistant: {str(sync_error)}")
+        
+        logger.info(f"Soft deleted chunk {chunk_id}")
         return {"message": "Chunk deleted successfully"}
         
     except HTTPException:
@@ -236,6 +312,7 @@ async def search_chunks(
         # Build search query
         query = supabase.table("chunks").select("*", count="exact")
         query = query.eq("organization_id", organization_id)
+        query = query.eq("deleted", False)  # Exclude deleted chunks
         
         # Text search (PostgreSQL full-text search)
         query = query.or_(f"name.ilike.%{search_request.query}%,description.ilike.%{search_request.query}%,content.ilike.%{search_request.query}%")
@@ -243,8 +320,6 @@ async def search_chunks(
         # Apply filters
         if search_request.source_type:
             query = query.eq("source_type", search_request.source_type)
-        if search_request.is_attached_to_assistant is not None:
-            query = query.eq("is_attached_to_assistant", search_request.is_attached_to_assistant)
         
         # Apply pagination
         offset = (search_request.page - 1) * search_request.page_size
@@ -276,15 +351,23 @@ async def search_chunks(
         logger.error(f"Error searching chunks: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to search chunks: {str(e)}")
 
-@router.put("/chunks/{chunk_id}/toggle-attachment")
-async def toggle_chunk_attachment(
-    chunk_id: UUID,
+
+@router.post("/chunks/batch-toggle", response_model=ChunkBatchToggleResponse)
+async def batch_toggle_chunks(
+    request: ChunkBatchToggleRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Toggle the is_attached_to_assistant status of a chunk
+    Batch toggle chunk attachments - attach or detach multiple chunks from VAPI assistant.
+    
+    Logic:
+    - If is_attached=true and no vapi_file_id: Upload to VAPI and set vapi_file_id
+    - If is_attached=false and has vapi_file_id: Delete from VAPI and clear vapi_file_id
+    - Updates database and syncs assistant after all changes
     """
     try:
+        from app.services.vapi_assistant import upload_chunk_to_vapi, delete_file_from_vapi, sync_assistant_prompt
+        
         supabase = get_supabase_client()
         
         # Get user's organization
@@ -292,26 +375,98 @@ async def toggle_chunk_attachment(
         if not organization_id:
             raise HTTPException(status_code=400, detail="User has no organization")
         
-        # Get current chunk
-        result = supabase.table("chunks").select("is_attached_to_assistant").eq("id", chunk_id).eq("organization_id", organization_id).execute()
+        updated_count = 0
+        attached_count = 0
+        detached_count = 0
+        failed_chunks = []
         
-        if not result.data:
-            raise HTTPException(status_code=404, detail="Chunk not found")
+        # Process each chunk
+        for toggle_item in request.chunks:
+            try:
+                chunk_id = str(toggle_item.chunk_id)
+                is_attached = toggle_item.is_attached
+                
+                # Get chunk from database
+                chunk_result = supabase.table("chunks").select("*").eq("id", chunk_id).eq("organization_id", organization_id).eq("deleted", False).single().execute()
+                
+                if not chunk_result.data:
+                    logger.warning(f"Chunk {chunk_id} not found or deleted")
+                    failed_chunks.append(chunk_id)
+                    continue
+                
+                chunk = chunk_result.data
+                current_vapi_file_id = chunk.get("vapi_file_id")
+                
+                # Case 1: Attach (toggle ON) - need to upload if no vapi_file_id
+                if is_attached and not current_vapi_file_id:
+                    # Upload to VAPI
+                    vapi_file_id = await upload_chunk_to_vapi(
+                        chunk_id,
+                        chunk.get('name', 'Unnamed Chunk'),
+                        chunk.get('content', ''),
+                        bullets=chunk.get('bullets', []),
+                        sample_questions=chunk.get('sample_questions', [])
+                    )
+                    
+                    if vapi_file_id:
+                        # Update database with vapi_file_id
+                        supabase.table("chunks").update({"vapi_file_id": vapi_file_id}).eq("id", chunk_id).execute()
+                        attached_count += 1
+                        updated_count += 1
+                        logger.info(f"Attached chunk {chunk_id} to VAPI with file_id {vapi_file_id}")
+                    else:
+                        logger.warning(f"Failed to upload chunk {chunk_id} to VAPI")
+                        failed_chunks.append(chunk_id)
+                
+                # Case 2: Detach (toggle OFF) - need to delete if has vapi_file_id
+                elif not is_attached and current_vapi_file_id:
+                    # Delete from VAPI
+                    success = await delete_file_from_vapi(current_vapi_file_id)
+                    
+                    if success:
+                        # Clear vapi_file_id in database
+                        supabase.table("chunks").update({"vapi_file_id": None}).eq("id", chunk_id).execute()
+                        detached_count += 1
+                        updated_count += 1
+                        logger.info(f"Detached chunk {chunk_id} from VAPI, removed file_id {current_vapi_file_id}")
+                    else:
+                        logger.warning(f"Failed to delete chunk {chunk_id} from VAPI")
+                        failed_chunks.append(chunk_id)
+                
+                # Case 3: No action needed (already in desired state)
+                else:
+                    logger.info(f"Chunk {chunk_id} already in desired state (attached={is_attached})")
+                    
+            except Exception as chunk_error:
+                logger.error(f"Error processing chunk {toggle_item.chunk_id}: {str(chunk_error)}")
+                failed_chunks.append(str(toggle_item.chunk_id))
         
-        current_status = result.data[0]["is_attached_to_assistant"]
-        new_status = not current_status
+        # Sync assistant after all changes
+        try:
+            rec_row = supabase.table("receptionists").select("assistant_id").eq("id", request.receptionist_id).single().execute()
+            assistant_id = rec_row.data.get("assistant_id") if rec_row.data else None
+            if assistant_id:
+                await sync_assistant_prompt(assistant_id, str(request.receptionist_id))
+                logger.info(f"Synced assistant {assistant_id} after batch toggle")
+        except Exception as sync_error:
+            logger.warning(f"Failed to sync assistant: {str(sync_error)}")
         
-        # Update chunk
-        result = supabase.table("chunks").update({"is_attached_to_assistant": new_status}).eq("id", chunk_id).eq("organization_id", organization_id).execute()
+        message = f"Batch toggle completed: {updated_count} chunks updated ({attached_count} attached, {detached_count} detached)"
+        if failed_chunks:
+            message += f", {len(failed_chunks)} failed"
         
-        if not result.data:
-            raise HTTPException(status_code=404, detail="Chunk not found")
+        logger.info(message)
         
-        logger.info(f"Toggled chunk {chunk_id} attachment status to {new_status}")
-        return {"message": f"Chunk attachment status updated to {new_status}", "is_attached_to_assistant": new_status}
+        return ChunkBatchToggleResponse(
+            message=message,
+            updated_count=updated_count,
+            attached_count=attached_count,
+            detached_count=detached_count,
+            failed_chunks=failed_chunks
+        )
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error toggling chunk {chunk_id} attachment: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to toggle chunk attachment: {str(e)}")
+        logger.error(f"Error in batch toggle: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to batch toggle chunks: {str(e)}")

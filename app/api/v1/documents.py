@@ -184,7 +184,6 @@ async def process_document(
                 content=chunk['content'],
                 bullets=chunk['bullets'],
                 sample_questions=chunk['sample_questions'],
-                is_attached_to_assistant=chunk['is_attached_to_assistant'],
                 created_at=chunk.get('created_at'),
                 updated_at=chunk.get('updated_at'),
                 created_by_user_id=chunk['created_by_user_id']
@@ -309,7 +308,6 @@ async def get_supported_formats():
                 content=chunk['content'],
                 bullets=chunk['bullets'],
                 sample_questions=chunk['sample_questions'],
-                is_attached_to_assistant=chunk['is_attached_to_assistant'],
                 created_at=chunk.get('created_at'),
                 updated_at=chunk.get('updated_at'),
                 created_by_user_id=chunk['created_by_user_id']
@@ -535,7 +533,6 @@ async def process_text_simple(
             "content": request.text,
             "bullets": [],  # No AI-generated bullets
             "sample_questions": [],  # No AI-generated questions
-            "is_attached_to_assistant": False,
             "created_by_user_id": None,  # Skip user tracking for now due to foreign key constraint
             "receptionist_id": request.receptionist_id if hasattr(request, "receptionist_id") else None
         }

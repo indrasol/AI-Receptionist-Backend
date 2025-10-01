@@ -84,10 +84,50 @@ async def upload_chunk_to_vapi(
         return None
 
 
+async def delete_file_from_vapi(vapi_file_id: str) -> bool:
+    """
+    Delete a file from VAPI knowledge base.
+    
+    Args:
+        vapi_file_id: VAPI file ID to delete
+        
+    Returns:
+        True if successful or file doesn't exist, False on error
+    """
+    vapi_key = os.getenv("AI_RECEPTION_VAPI_AUTH_TOKEN")
+    if not vapi_key:
+        logger.warning("VAPI token not configured, skipping file deletion")
+        return False
+    
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.delete(
+                f"https://api.vapi.ai/file/{vapi_file_id}",
+                headers={"Authorization": f"Bearer {vapi_key}"}
+            )
+            
+            if response.status_code in [200, 204]:
+                logger.info(f"Successfully deleted file {vapi_file_id} from VAPI")
+                return True
+            elif response.status_code == 404:
+                logger.info(f"File {vapi_file_id} not found in VAPI (already deleted)")
+                return True  # Consider this a success
+            else:
+                logger.error(f"Failed to delete file from VAPI: {response.status_code} - {response.text}")
+                return False
+                
+    except Exception as e:
+        logger.error(f"Error deleting file from VAPI: {str(e)}")
+        return False
+
+
 async def get_vapi_file_ids_for_receptionist(receptionist_id: str) -> List[str]:
-    """Get all VAPI file IDs for chunks belonging to a receptionist."""
+    """
+    Get all VAPI file IDs for chunks belonging to a receptionist.
+    Only returns file IDs for chunks that are not deleted and have vapi_file_id set.
+    """
     supabase = get_supabase_client()
-    res = supabase.table("chunks").select("vapi_file_id").eq("receptionist_id", receptionist_id).execute()
+    res = supabase.table("chunks").select("vapi_file_id").eq("receptionist_id", receptionist_id).eq("deleted", False).execute()
     
     # Filter out None values and return list of file IDs
     file_ids = [row["vapi_file_id"] for row in (res.data or []) if row.get("vapi_file_id")]
