@@ -80,13 +80,43 @@ async def scrape_url(
             result = supabase.table("chunks").insert(chunks).execute()
             saved_chunks = result.data if result.data else []
 
-        # sync assistant prompt
-        from app.services.vapi_assistant import sync_assistant_prompt
+        # Step 4: Upload chunks to VAPI as files and update vapi_file_id
+        from app.services.vapi_assistant import upload_chunk_to_vapi, sync_assistant_prompt
+        for saved_chunk in saved_chunks:
+            try:
+                chunk_id = saved_chunk.get('id')
+                chunk_name = saved_chunk.get('name', 'Unnamed Chunk')
+                chunk_content = saved_chunk.get('content', '')
+                bullets = saved_chunk.get('bullets', [])
+                sample_questions = saved_chunk.get('sample_questions', [])
+                
+                # Upload to VAPI with complete information
+                vapi_file_id = await upload_chunk_to_vapi(
+                    chunk_id, 
+                    chunk_name, 
+                    chunk_content,
+                    bullets=bullets,
+                    sample_questions=sample_questions
+                )
+                
+                # Update chunk with vapi_file_id
+                if vapi_file_id:
+                    supabase.table("chunks").update({"vapi_file_id": vapi_file_id}).eq("id", chunk_id).execute()
+                    logger.info(f"Updated chunk {chunk_id} with VAPI file ID: {vapi_file_id}")
+            except Exception as upload_error:
+                logger.warning(f"Failed to upload chunk {chunk_id} to VAPI: {str(upload_error)}")
+                # Continue with other chunks
+
+        # Step 5: Sync assistant with updated knowledge base file IDs
         if request.receptionist_id:
-            rec_row = supabase.table("receptionists").select("assistant_id").eq("id", request.receptionist_id).single().execute()
-            assistant_id = rec_row.data.get("assistant_id") if rec_row.data else None
-            if assistant_id:
-                await sync_assistant_prompt(assistant_id, request.receptionist_id)
+            try:
+                rec_row = supabase.table("receptionists").select("assistant_id").eq("id", request.receptionist_id).single().execute()
+                assistant_id = rec_row.data.get("assistant_id") if rec_row.data else None
+                if assistant_id:
+                    await sync_assistant_prompt(assistant_id, request.receptionist_id)
+                    logger.info(f"Successfully synced VAPI assistant {assistant_id} with scraped URL knowledge")
+            except Exception as sync_error:
+                logger.warning(f"Failed to sync VAPI assistant: {str(sync_error)}")
         
         processing_time = time.time() - start_time
         
