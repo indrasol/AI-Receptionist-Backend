@@ -119,6 +119,7 @@ IMPORTANT: You must respond with ONLY a valid JSON object. Do not include any te
     async def _call_openai_api(self, prompt: str) -> str:
         """Call OpenAI API with the prompt"""
         try:
+            # Use response_format to ensure JSON output
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",  # Using the more cost-effective model
                 messages=[
@@ -132,13 +133,23 @@ IMPORTANT: You must respond with ONLY a valid JSON object. Do not include any te
                     }
                 ],
                 max_tokens=4000,
-                temperature=0.3  # Lower temperature for more consistent results
+                temperature=0.3,  # Lower temperature for more consistent results
+                response_format={"type": "json_object"}  # Force JSON response
             )
             
-            return response.choices[0].message.content
+            # Safely extract the content
+            content = response.choices[0].message.content
+            
+            # Convert response to dict to avoid Pydantic issues
+            if content is None:
+                logger.error("OpenAI returned None content")
+                raise ValueError("OpenAI API returned empty content")
+            
+            return str(content)
             
         except Exception as e:
             logger.error(f"OpenAI API call failed: {str(e)}")
+            logger.error(f"Error type: {type(e).__name__}")
             raise e
     
     def _parse_openai_response(

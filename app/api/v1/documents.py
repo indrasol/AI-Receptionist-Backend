@@ -26,6 +26,7 @@ class TextProcessingResponse(BaseModel):
 @router.post("/process-document", response_model=DocumentUploadResponse)
 async def process_document(
     file: UploadFile = File(..., description="Document file to process (PDF, DOCX, TXT, CSV)"),
+    receptionist_id: str = Form(None, description="Optional receptionist ID to associate chunks with"),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -68,7 +69,7 @@ async def process_document(
             logger.error(f"No organization_id found in user data: {current_user}")
             raise HTTPException(status_code=400, detail="User organization not found")
         
-        logger.info(f"Starting document processing for {file.filename} by user {user_email}")
+        logger.info(f"Starting document processing for {file.filename} by user {user_email} for receptionist {receptionist_id}")
         
         # Initialize services
         document_service = DocumentProcessingService()
@@ -90,20 +91,27 @@ async def process_document(
         }
         
         # Generate chunks using OpenAI
-        chunks = await openai_service.generate_chunks_from_scraped_data(
-            scraped_data=scraped_data,
-            organization_id=organization_id
-        )
+        try:
+            chunks = await openai_service.generate_chunks_from_scraped_data(
+                scraped_data=scraped_data,
+                organization_id=organization_id
+            )
+        except Exception as openai_error:
+            logger.error(f"OpenAI processing failed: {str(openai_error)}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Failed to process document content with AI: {str(openai_error)}"
+            )
         
         if not chunks:
-            raise HTTPException(status_code=500, detail="Failed to generate chunks from document")
+            raise HTTPException(status_code=500, detail="No chunks were generated from document")
         
         # Update chunks with document-specific information
         for chunk in chunks:
             chunk["source_type"] = "file"  # Use "file" instead of "document" to match schema
             chunk["source_id"] = document_result['filename']
             chunk["created_by_user_id"] = None  # Skip user tracking for now due to foreign key constraint
-            chunk["receptionist_id"] = None  # pass through later
+            chunk["receptionist_id"] = receptionist_id if receptionist_id else None
         
         # Save chunks to database
         try:
