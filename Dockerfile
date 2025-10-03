@@ -22,8 +22,7 @@ COPY app/ app/
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash appuser \
-    && chown -R appuser:appuser /src \
-    && chown -R appuser:appuser /home/appuser/.cache
+    && chown -R appuser:appuser /src
 
 # Switch to appuser and install Playwright browsers for the user
 USER appuser
