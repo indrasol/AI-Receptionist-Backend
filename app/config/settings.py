@@ -65,7 +65,7 @@ CSA_OPENAIIND=os.getenv('CSA_OPENAIIND')
 # Chunk generation limits
 MAX_TOTAL_CHUNKS_CHARACTERS = int(os.getenv('MAX_TOTAL_CHUNKS_CHARACTERS', '1000000'))  # 1M characters total
 MAX_CHUNK_CHARACTERS = int(os.getenv('MAX_CHUNK_CHARACTERS', '100000'))  # 100K characters per chunk
-MAX_CHUNKS_PER_URL = int(os.getenv('MAX_CHUNKS_PER_URL', '1'))  # 1 chunk per URL
+MAX_CHUNKS_PER_URL = int(os.getenv('MAX_CHUNKS_PER_URL', '10'))  # 1 chunk per URL
 
 API_V1_STR=os.getenv('AI_RECEPTION_API_V1_STR', '/api/v1')
 HOST=os.getenv('AI_RECEPTION_HOST', '0.0.0.0')
