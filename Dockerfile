@@ -3,14 +3,19 @@
 FROM python:3.11-slim AS base
 WORKDIR /src
 
-# Install system dependencies that might be needed
+# Install system dependencies including browser dependencies for Playwright
 RUN apt-get update && apt-get install -y \
     curl \
+    wget \
+    gnupg \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first to leverage Docker cache
 COPY app/requirements.txt app/
 RUN pip install --no-cache-dir -r app/requirements.txt
+
+# Install Playwright browsers and dependencies (must be done as root)
+RUN playwright install --with-deps chromium
 
 # Copy the actual application code
 COPY app/ app/

@@ -48,7 +48,7 @@ async def scrape_url(
             raise HTTPException(status_code=400, detail="User has no organization")
         
         # Step 1: Scrape the website
-        async with WebScraperService(use_selenium=True) as scraper:
+        async with WebScraperService(use_playwright=True) as scraper:
             scraped_content = await scraper.scrape_url_recursive(
                 url=request.url,
                 max_depth=request.max_depth or 3,
