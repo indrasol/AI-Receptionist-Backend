@@ -22,8 +22,12 @@ COPY app/ app/
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash appuser \
-    && chown -R appuser:appuser /src
+    && chown -R appuser:appuser /src \
+    && chown -R appuser:appuser /home/appuser/.cache
+
+# Switch to appuser and install Playwright browsers for the user
 USER appuser
+RUN playwright install chromium
 
 # Add /src to PYTHONPATH so 'from app.config' works
 ENV PYTHONPATH=/src
