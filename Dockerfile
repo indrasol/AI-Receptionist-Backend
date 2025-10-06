@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     wget \
     gnupg \
-    supervisor \
+    redis-server \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first to leverage Docker cache
@@ -21,16 +21,9 @@ RUN playwright install --with-deps chromium
 # Copy the actual application code
 COPY app/ app/
 
-# Copy supervisor configuration
-COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-
-# Create non-root user
-RUN useradd --create-home --shell /bin/bash appuser \
-    && chown -R appuser:appuser /src
-
-# Switch to appuser and install Playwright browsers for the user
-USER appuser
-RUN playwright install chromium
+# Create startup script
+COPY docker/start.sh /start.sh
+RUN chmod +x /start.sh
 
 # Add /src to PYTHONPATH so 'from app.config' works
 ENV PYTHONPATH=/src
@@ -42,5 +35,5 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
 # gunicorn will listen on 8000 inside the container
 EXPOSE 8000
 
-# Use supervisor to manage multiple processes
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+# Use startup script to manage processes
+CMD ["/start.sh"]

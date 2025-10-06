@@ -2,7 +2,7 @@
 
 ## 🏗️ Architecture Overview
 
-This application consists of **3 main components**:
+This application consists of **3 main components** running in a **single container**:
 
 1. **FastAPI Server** - Main API server handling HTTP requests and WebSocket connections
 2. **Celery Worker** - Background task processor for web scraping
@@ -10,12 +10,12 @@ This application consists of **3 main components**:
 
 ## 🐳 Single Container Deployment
 
-The application is configured to run all services in a **single container** using **Supervisor** for process management.
+The application uses a **startup script** to manage all services in a single container:
 
-### Services Managed by Supervisor:
-- **Redis Server** - Message broker and cache
-- **Celery Worker** - Background task processor
-- **FastAPI Server** - Main API server
+### Services Started by Startup Script:
+- **Redis Server** - Message broker and cache (daemonized)
+- **Celery Worker** - Background task processor (background process)
+- **FastAPI Server** - Main API server (foreground process)
 
 ## 📋 Deployment Steps
 
