@@ -332,9 +332,20 @@ class WebScraperService:
         """Scrape using Playwright for all websites"""
         scraped_at = datetime.now()
         
+        # 1) Try MCP first for more isolated scraping
         try:
-            logger.info(f"Scraping {url} with Playwright")
-            
+            content_mcp = await self.scrape_with_mcp(url, scraped_at)
+            if content_mcp and content_mcp.status_code == 200:
+                return content_mcp
+            else:
+                logger.info(f"MCP scraping did not return 200 for {url}, falling back to direct Playwright")
+        except Exception as mcp_err:
+            logger.warning(f"MCP scraping failed for {url}: {str(mcp_err)} – falling back to direct Playwright")
+
+        # 2) Fallback to in-process Playwright (existing behaviour)
+        try:
+            logger.info(f"Scraping {url} with Playwright (fallback)")
+
             if not self.playwright_context:
                 logger.error(f"Playwright context not available for {url}")
                 return ScrapedContent(
@@ -342,15 +353,146 @@ class WebScraperService:
                     scraped_at=scraped_at,
                     error="Playwright context not available"
                 )
-            
+
             return await self.scrape_with_playwright(url, scraped_at)
-                
+         
         except Exception as e:
             logger.error(f"Error scraping {url}: {str(e)}")
             return ScrapedContent(
                 url=url,
                 scraped_at=scraped_at,
                 error=str(e)
+            )
+
+    async def scrape_with_mcp(self, url: str, scraped_at: datetime) -> ScrapedContent:
+        """Scrape a page using an external Playwright MCP server via the agents SDK"""
+        try:
+            logger.info(f"Using Playwright MCP to scrape {url}")
+
+            # Lazy-import agents to avoid mandatory dependency in non-MCP environments
+            try:
+                from agents import Agent, Runner, set_default_openai_key
+                from agents.mcp import MCPServerStdio
+            except ImportError as imp_err:
+                raise RuntimeError("agents package not installed – cannot use MCP") from imp_err
+
+            # Configure OpenAI key for the agents SDK
+            try:
+                from app.config.settings import CSA_OPENAIIND  # type: ignore
+                set_default_openai_key(CSA_OPENAIIND)
+            except Exception:
+                logger.warning("CSA_OPENAIIND not configured – MCP agent may fail")
+
+            # Strong instruction to return structured JSON we can map to ScrapedContent
+            mcp_instruction = (
+                "Navigate to the provided URL, wait until the page is fully rendered, "
+                "and return ONLY a JSON object with keys: "
+                "{title, content, meta_description, headings, links, images}. "
+                "\n- title: page.title() \n- content: main readable text (max 20k chars) "
+                "\n- meta_description: content of <meta name=description> if present "
+                "\n- headings: array of all h1-h6 innerText strings (max 50) "
+                "\n- links: array of absolute URLs from <a href> elements (max 300) "
+                "\n- images: array of image src URLs (max 50)."
+            )
+
+            async with MCPServerStdio(
+                name="Playwright-mcp",
+                params={"command": "npx", "args": ["-y", "@playwright/mcp@latest"]},
+            ) as server:
+                agent = Agent(
+                    name="Playwright-scraper-agent",
+                    model="gpt-4o-mini",
+                    instructions=mcp_instruction,
+                    mcp_servers=[server],
+                )
+
+                result = await Runner.run(agent, url)
+
+            print(result.final_output)
+            print(result)
+            text = (result.final_output or "").strip()
+            if text.startswith("```"):
+                # Strip Markdown fences
+                if "```json" in text:
+                    text = text.split("```json", 1)[1].rsplit("```", 1)[0].strip()
+                else:
+                    text = text.strip("`\n")
+
+            import json as _json
+            parsed = _json.loads(text)
+
+            # Safety fallback values
+            title = parsed.get("title") or ""
+            content = parsed.get("content") or ""
+            headings = parsed.get("headings") or []
+            raw_links = parsed.get("links") or []
+            # Convert relative links to absolute URLs and deduplicate
+            links: list[str] = []
+            for l in raw_links:
+                if not l:
+                    continue
+                absolute = urljoin(url, l)
+                if absolute not in links:
+                    links.append(absolute)
+ 
+            # If MCP returned very few links on same domain, quickly gather more using Playwright for better discovery
+            same_domain_links = [l for l in links if self.is_same_domain(l, url)]
+            if len(same_domain_links) < 5 and self.playwright_context:
+                try:
+                    temp_page = await self.playwright_context.new_page()
+                    await temp_page.goto(url, wait_until='domcontentloaded', timeout=15000)
+                    link_elems = await temp_page.query_selector_all("a[href]")
+                    for elem in link_elems[:300]:
+                        href = await elem.get_attribute("href")
+                        if href:
+                            abs_link = urljoin(url, href)
+                            if abs_link not in links:
+                                links.append(abs_link)
+                    await temp_page.close()
+                    logger.info(f"Enhanced link extraction via Playwright added {len(links)-len(raw_links)} links for {url}")
+                except Exception as le_err:
+                    logger.warning(f"Link extraction fallback failed for {url}: {le_err}")
+
+            meta_desc = parsed.get("meta_description") or ""
+            images = parsed.get("images") or []
+
+            # Basic success check – require at least some content
+            if not content:
+                return ScrapedContent(
+                    url=url,
+                    scraped_at=scraped_at,
+                    status_code=204,
+                    title=title,
+                    content=content,
+                    meta_description=meta_desc,
+                    headings=headings,
+                    links=links,
+                    images=images,
+                    error="No content returned from MCP"
+                )
+
+            quality_analysis = self.detect_content_quality(content, title, headings, links)
+            quality_analysis["scraping_method"] = "mcp"
+
+            return ScrapedContent(
+                url=url,
+                title=title,
+                content=content[:5000],
+                meta_description=meta_desc,
+                headings=headings[:20],
+                links=links[:200],
+                images=images[:20],
+                scraped_at=scraped_at,
+                status_code=200,
+                quality_analysis=quality_analysis,
+            )
+
+        except Exception as e:
+            logger.error(f"MCP scraping failed for {url}: {str(e)}")
+            return ScrapedContent(
+                url=url,
+                scraped_at=scraped_at,
+                error=f"MCP error: {str(e)}"
             )
     
     def discover_urls(self, base_url: str, scraped_content: ScrapedContent) -> List[str]:

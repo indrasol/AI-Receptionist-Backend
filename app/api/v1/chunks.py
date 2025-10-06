@@ -21,7 +21,7 @@ router = APIRouter(tags=["Chunks Management"])
 @router.get("/chunks", response_model=ChunkListResponse)
 async def get_chunks(
     page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(20, ge=1, le=100, description="Number of items per page"),
+    page_size: int = Query(2000, ge=1, le=100, description="Number of items per page"),
     source_type: Optional[str] = Query(None, description="Filter by source type"),
     receptionist_id: Optional[str] = Query(None, description="Filter by receptionist"),
     current_user: dict = Depends(get_current_user)
