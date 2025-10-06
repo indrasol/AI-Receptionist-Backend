@@ -31,10 +31,12 @@ def load_env_file():
     return False
 
 # Load environment variables
-load_env_file()
+env_file_loaded = load_env_file()
 
 # Print environment for debugging
 print(f"Running in {ENV} environment")
+if not env_file_loaded:
+    print("No .env file found - using environment variables from Azure Key Vault")
 
 
 # Main
