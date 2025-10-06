@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Set production environment
+export ENV=production
+
 # Start Redis in background
 redis-server --port 6379 --bind 0.0.0.0 --daemonize yes
 
