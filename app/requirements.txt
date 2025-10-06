@@ -24,3 +24,7 @@ python-docx>=0.8.11
 supabase==2.15.0
 # OpenAI official client (used directly and by agents)
 openai==1.107.3
+
+# Background tasks
+celery[redis]==5.3.6
+redis==4.6.0

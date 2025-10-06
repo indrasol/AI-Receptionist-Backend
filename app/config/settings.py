@@ -67,8 +67,18 @@ MAX_TOTAL_CHUNKS_CHARACTERS = int(os.getenv('MAX_TOTAL_CHUNKS_CHARACTERS', '1000
 MAX_CHUNK_CHARACTERS = int(os.getenv('MAX_CHUNK_CHARACTERS', '100000'))  # 100K characters per chunk
 MAX_CHUNKS_PER_URL = int(os.getenv('MAX_CHUNKS_PER_URL', '10'))  # 1 chunk per URL
 
+# Asynchronous task queue (Celery)
+REDIS_URL=os.getenv('AI_RECEPTION_REDIS_URL', 'redis://localhost:6379/0')
+
 API_V1_STR=os.getenv('AI_RECEPTION_API_V1_STR', '/api/v1')
 HOST=os.getenv('AI_RECEPTION_HOST', '0.0.0.0')
 PORT=int(os.getenv('AI_RECEPTION_PORT', '8000'))
 LOG_LEVEL=os.getenv('AI_RECEPTION_LOG_LEVEL', 'INFO')
 DEBUG=os.getenv('AI_RECEPTION_DEBUG', 'true').lower() in ('true', '1', 'yes', 'on')
+
+# Email settings (used for scrape completion notice)
+EMAIL_HOST=os.getenv('EMAIL_HOST')
+EMAIL_PORT=int(os.getenv('EMAIL_PORT', '587')) if os.getenv('EMAIL_PORT') else None
+EMAIL_USERNAME=os.getenv('EMAIL_USERNAME')
+EMAIL_PASSWORD=os.getenv('EMAIL_PASSWORD')
+EMAIL_FROM=os.getenv('EMAIL_FROM')
