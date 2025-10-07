@@ -3,10 +3,10 @@ Inbound Calls Management API
 Handles all inbound call operations including retrieval and management
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from app.utils.auth import get_current_user
 from app.database_operations import get_inbound_calls_by_user_organization
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
 import requests
 from app.config.settings import DEBUG,VAPI_AUTH_TOKEN
@@ -18,7 +18,12 @@ router = APIRouter(tags=["Inbound Calls Management"])
 
 
 @router.get("/get_calls", response_model=List[Dict[str, Any]])
-async def get_inbound_calls(current_user: dict = Depends(get_current_user)):
+async def get_inbound_calls(
+    receptionist_id: Optional[str] = Query(None, description="Filter by receptionist"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    current_user: dict = Depends(get_current_user),
+):
     """
     Get all inbound calls for the current user's organization
     
@@ -74,15 +79,52 @@ async def get_inbound_calls(current_user: dict = Depends(get_current_user)):
         
         logger.info(f"Fetching inbound calls for organization: {user_organization.get('name', 'Unknown')}")
         
-        # Get inbound calls for the user's organization
-        inbound_calls = await get_inbound_calls_by_user_organization(current_user.get("sub"))
+        supabase = get_supabase_client()
+
+        # Query calls table directly
+        query = supabase.table("ai_receptionist_inbound_calls").select("*")
+
+        # If receptionist_id provided, translate to assistant_id
+        if receptionist_id:
+            rec_resp = supabase.table("receptionists").select("assistant_id").eq("id", receptionist_id).execute()
+            assistant_id = rec_resp.data[0]["assistant_id"] if rec_resp.data else None
+            if assistant_id:
+                query = query.eq("assistant_id", assistant_id)
+            else:
+                # No assistant found for this receptionist, return empty list early
+                return []
+
+        # --- NEW: sync latest calls from Vapi for this assistant (best-effort) ---
+        if assistant_id:
+            try:
+                vapi_token = VAPI_AUTH_TOKEN
+                if vapi_token:
+                    vapi_resp = requests.get(
+                        f"https://api.vapi.ai/call?assistantId={assistant_id}",
+                        headers={"Authorization": f"Bearer {vapi_token}"}, timeout=15
+                    )
+                    if vapi_resp.status_code == 200:
+                        from app.vapi_processor import process_and_update_vapi_calls
+                        await process_and_update_vapi_calls(vapi_resp.json(), organization_id)
+                else:
+                    logger.warning("VAPI_AUTH_TOKEN not configured – skipping live sync")
+            except Exception as sync_err:
+                logger.warning(f"VAPI live sync failed: {sync_err}")
+
+        # pagination
+        offset = (page - 1) * page_size
+        query = query.range(offset, offset + page_size - 1)
+
+        result = query.order("created_at", desc=True).execute()
+
+        inbound_calls = result.data or []
         
         if not inbound_calls:
             logger.info(f"No inbound calls found for organization: {user_organization.get('name')}")
             return []
         
         # Sort by created_at (newest first)
-        sorted_calls = sorted(inbound_calls, key=lambda x: x.get("created_at", ""), reverse=True)
+        sorted_calls = inbound_calls  # already ordered
         
         # Add call_date and call_duration_formatted fields to each call
         for call in sorted_calls:
@@ -366,8 +408,14 @@ async def sync_vapi_calls(current_user: dict = Depends(get_current_user)):
         )
 
 
+from typing import List
+
+
 @router.get("/dashboard/stats")
-async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
+async def get_dashboard_stats(
+    receptionist_ids: Optional[List[str]] = Query(None, description="List of receptionist IDs to include"),
+    current_user: dict = Depends(get_current_user),
+):
     """
     Get dashboard statistics for the current user's organization
     
@@ -403,8 +451,22 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
         trends_view = "ai_receptionist_daily_trends_view"
         logger.info("Using dashboard views")
         
-        # Get main dashboard stats filtered by organization
-        dashboard_result = supabase.table(dashboard_view).select("*").eq("organization_id", organization_id).execute()
+        # Build base query on new receptionist-centric view
+        query = supabase.table(dashboard_view).select("*")
+
+        if receptionist_ids:
+            query = query.in_("receptionist_id", receptionist_ids)
+        else:
+            # Default: all receptionists within org -> get their ids first
+            rec_rows = supabase.table("receptionists").select("id").eq("org_id", organization_id).execute()
+            rec_ids = [r["id"] for r in (rec_rows.data or [])]
+            if rec_ids:
+                query = query.in_("receptionist_id", rec_ids)
+            else:
+                # no receptionists yet
+                return {"dashboard": {}, "trends": [], "message": "No receptionists"}
+
+        dashboard_result = query.execute()
         
         if not dashboard_result.data:
             logger.warning(f"No dashboard data found for organization {organization_id}")
@@ -432,8 +494,14 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
         
         dashboard_data = dashboard_result.data[0]
         
-        # Get daily trends for charts filtered by organization
-        trends_result = supabase.table(trends_view).select("*").eq("organization_id", organization_id).order("date").execute()
+        # Daily trends filtered by receptionist IDs
+        trends_query = supabase.table(trends_view).select("*")
+        if receptionist_ids:
+            trends_query = trends_query.in_("receptionist_id", receptionist_ids)
+        else:
+            trends_query = trends_query.in_("receptionist_id", rec_ids)
+
+        trends_result = trends_query.order("date").execute()
         trends_data = trends_result.data if trends_result.data else []
         
         # Format the response
@@ -455,9 +523,9 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
                 "outbound_calls_completed": dashboard_data.get("outbound_calls_completed", 0)
             },
             "trends": trends_data,
-            "organization": {
-                "id": dashboard_data.get("organization_id"),
-                "name": dashboard_data.get("organization_name", "CSA")
+            "receptionist": {
+                "id": dashboard_data.get("receptionist_id"),
+                "name": dashboard_data.get("receptionist_name", "Receptionist")
             },
             "metadata": {
                 "current_date": dashboard_data.get("current_date"),

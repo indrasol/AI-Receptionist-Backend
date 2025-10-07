@@ -3,33 +3,38 @@
 FROM python:3.11-slim AS base
 WORKDIR /src
 
-# Install system dependencies that might be needed
+# Install system dependencies including browser dependencies for Playwright
 RUN apt-get update && apt-get install -y \
     curl \
+    wget \
+    gnupg \
+    redis-server \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first to leverage Docker cache
 COPY app/requirements.txt app/
 RUN pip install --no-cache-dir -r app/requirements.txt
 
+# Install Playwright browsers and dependencies (must be done as root)
+RUN playwright install --with-deps chromium
+
 # Copy the actual application code
 COPY app/ app/
 
-# Create non-root user
-RUN useradd --create-home --shell /bin/bash appuser \
-    && chown -R appuser:appuser /src
-USER appuser
+# Create startup script
+COPY docker/start.sh /start.sh
+RUN chmod +x /start.sh
 
 # Add /src to PYTHONPATH so 'from app.config' works
 ENV PYTHONPATH=/src
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/api/v1/docs || exit 1
+    CMD curl -f http://localhost:8000/health || exit 1
 
-# gunicorn will listen on 8000 inside the container
-EXPOSE 8000
+# FastAPI will listen on 8000 inside the container
+# Redis will listen on 6379 inside the container (for RedisInsight access)
+EXPOSE 8000 6379
 
-# Simplified startup command with better error handling
-# CMD ["gunicorn", "--workers", "2", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "--log-level", "info", "main:app"]
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--access-log", "--log-level", "info"]
+# Use startup script to manage processes
+CMD ["/start.sh"]

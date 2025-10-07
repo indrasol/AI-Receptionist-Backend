@@ -19,11 +19,11 @@ class ChunkBase(BaseModel):
     content: str = Field(..., description="The actual cleaned text content of the chunk")
     bullets: Optional[List[str]] = Field(None, description="Array of key bullet points extracted from content")
     sample_questions: Optional[List[str]] = Field(None, description="Array of sample questions this chunk can answer")
-    is_attached_to_assistant: bool = Field(False, description="Toggle for UI - whether chunk is attached to AI assistant")
 
 class ChunkCreate(ChunkBase):
     """Schema for creating a new chunk"""
     organization_id: UUID = Field(..., description="Organization that owns this chunk")
+    receptionist_id: Optional[UUID] = Field(None, description="Receptionist this chunk is linked to")
 
 class ChunkUpdate(BaseModel):
     """Schema for updating a chunk"""
@@ -32,7 +32,7 @@ class ChunkUpdate(BaseModel):
     content: Optional[str] = Field(None, description="The actual cleaned text content of the chunk")
     bullets: Optional[List[str]] = Field(None, description="Array of key bullet points extracted from content")
     sample_questions: Optional[List[str]] = Field(None, description="Array of sample questions this chunk can answer")
-    is_attached_to_assistant: Optional[bool] = Field(None, description="Toggle for UI - whether chunk is attached to AI assistant")
+    receptionist_id: Optional[UUID] = Field(None, description="Receptionist this chunk is linked to")
 
 class ChunkDB(ChunkBase):
     """Schema for chunk as stored in database"""
@@ -41,6 +41,9 @@ class ChunkDB(ChunkBase):
     created_at: datetime = Field(..., description="Timestamp when chunk was created")
     updated_at: datetime = Field(..., description="Timestamp when chunk was last updated")
     created_by_user_id: Optional[UUID] = Field(None, description="User who created this chunk")
+    receptionist_id: Optional[UUID] = Field(None, description="Receptionist this chunk is linked to")
+    vapi_file_id: Optional[str] = Field(None, description="VAPI file ID if uploaded to VAPI knowledge base")
+    deleted: bool = Field(False, description="Soft delete flag")
 
     class Config:
         from_attributes = True
@@ -67,7 +70,6 @@ class ChunkSearchRequest(BaseModel):
     """Schema for searching chunks"""
     query: str = Field(..., min_length=1, description="Search query")
     source_type: Optional[SourceType] = Field(None, description="Filter by source type")
-    is_attached_to_assistant: Optional[bool] = Field(None, description="Filter by attachment status")
     page: int = Field(1, ge=1, description="Page number")
     page_size: int = Field(20, ge=1, le=100, description="Number of items per page")
 
@@ -79,3 +81,21 @@ class ChunkSearchResponse(BaseModel):
     page_size: int
     total_pages: int
     query: str
+
+class ChunkToggleItem(BaseModel):
+    """Schema for a single chunk toggle item"""
+    chunk_id: UUID = Field(..., description="ID of the chunk to toggle")
+    is_attached: bool = Field(..., description="Whether to attach (true) or detach (false) from assistant")
+
+class ChunkBatchToggleRequest(BaseModel):
+    """Schema for batch toggling chunk attachments"""
+    chunks: List[ChunkToggleItem] = Field(..., description="List of chunks with their desired attachment status")
+    receptionist_id: UUID = Field(..., description="Receptionist ID to sync after toggling")
+
+class ChunkBatchToggleResponse(BaseModel):
+    """Schema for batch toggle response"""
+    message: str
+    updated_count: int
+    attached_count: int
+    detached_count: int
+    failed_chunks: List[str] = Field(default_factory=list, description="List of chunk IDs that failed to update")

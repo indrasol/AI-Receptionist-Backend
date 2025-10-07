@@ -3,7 +3,7 @@ URL Scraping API Endpoints
 Handles web scraping requests and content extraction
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from app.schemas.scraper import UrlScrapeRequest, UrlScrapeResponse, ScrapedContent
 from app.services.scraper_service import WebScraperService
 from app.services.openai_service import OpenAIService
@@ -23,89 +23,121 @@ async def scrape_url(
     request: UrlScrapeRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Scrape URL and automatically generate chunks using OpenAI
-    
-    This endpoint combines web scraping with AI-powered chunk generation.
-    It scrapes the website content and then uses OpenAI to create structured
-    chunks suitable for AI assistant training.
-    
-    - **url**: The URL to scrape (e.g., "https://example.com")
-    - **max_depth**: Maximum depth for recursive scraping (default: 3)
-    - **include_subdomains**: Whether to include subdomains (default: true)
-    - **include_subpages**: Whether to include subpages (default: true)
-    
-    Returns both the scraped content and the generated chunks.
-    """
-    start_time = time.time()
-    
+    """Enqueue a background scrape job and return its task_id."""
+
     try:
-        logger.info(f"Starting scrape-and-chunk for {request.url}")
-        
-        # Get user's organization
+        # Identify org / receptionist
         organization_id = current_user.get("organization", {}).get("id")
         if not organization_id:
             raise HTTPException(status_code=400, detail="User has no organization")
-        
-        # Step 1: Scrape the website
-        async with WebScraperService(use_selenium=True) as scraper:
-            scraped_content = await scraper.scrape_url_recursive(
-                url=request.url,
-                max_depth=request.max_depth or 3,
-                include_subdomains=request.include_subdomains if request.include_subdomains is not None else True,
-                include_subpages=request.include_subpages if request.include_subpages is not None else True
-            )
-        
-        # Step 2: Generate chunks using OpenAI
-        openai_service = OpenAIService()
-        chunks = await openai_service.generate_chunks_from_scraped_data(
-            scraped_data={
-                "scraped_content": [content.model_dump() for content in scraped_content]
-            },
-            organization_id=str(organization_id)
-        )
-        
-        # Step 3: Save chunks to database
+
         supabase = get_supabase_client()
-        saved_chunks = []
-        
-        if chunks:
-            # Add user info to chunks
-            user_id = current_user.get("sub", "unknown")
-            for chunk in chunks:
-                chunk["created_by_user_id"] = user_id if user_id != "unknown" else None
-            
-            # Insert chunks into database
-            result = supabase.table("chunks").insert(chunks).execute()
-            saved_chunks = result.data if result.data else []
-        
-        processing_time = time.time() - start_time
-        
-        # Calculate statistics
-        total_urls = len(scraped_content)
-        successful_scrapes = len([content for content in scraped_content if content.status_code == 200])
-        failed_scrapes = total_urls - successful_scrapes
-        
-        logger.info(f"Scrape-and-chunk completed: {successful_scrapes} URLs scraped, {len(saved_chunks)} chunks generated")
-        
-        return {
-            "message": f"Successfully scraped {successful_scrapes} URLs and generated {len(saved_chunks)} chunks",
-            "scraping_stats": {
-                "total_urls_scraped": total_urls,
-                "successful_scrapes": successful_scrapes,
-                "failed_scrapes": failed_scrapes,
-                "processing_time_seconds": round(processing_time, 2)
-            },
-            "chunks_generated": len(saved_chunks),
-            "chunks": saved_chunks,
-            "scraped_content": [content.model_dump() for content in scraped_content]
+
+        # Create task row in DB
+        task_row = {
+            "status": "queued",
+            "url": request.url,
+            "organization_id": organization_id,
+            "receptionist_id": request.receptionist_id,
         }
-        
-    except Exception as e:
-        logger.error(f"Error in scrape-and-chunk for {request.url}: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to scrape and generate chunks: {str(e)}"
+        inserted = supabase.table("scrape_tasks").insert(task_row).execute()
+        task_id = inserted.data[0]["id"]
+
+        # Enqueue Celery task (include notify_email from current user)
+        from app.tasks.scrape_tasks import scrape_website
+        scrape_website.delay(
+            task_id=task_id,
+            url=request.url,
+            receptionist_id=request.receptionist_id,
+            organization_id=str(organization_id),
+            max_depth=request.max_depth or 3,
+            include_subdomains=request.include_subdomains if request.include_subdomains is not None else True,
+            include_subpages=request.include_subpages if request.include_subpages is not None else True,
+            notify_email=current_user.get("email"),
         )
+
+        return {"task_id": task_id, "status": "queued"}
+    except Exception as e:
+        logger.error(f"Failed to enqueue scrape: {e}")
+        raise HTTPException(status_code=500, detail="Failed to enqueue scrape task")
+
+
+# ---------------- New endpoints -----------------
+
+
+@router.get("/task/{task_id}")
+async def get_scrape_task(task_id: str, current_user: dict = Depends(get_current_user)):
+    """Return status information for a specific scrape task."""
+    supabase = get_supabase_client()
+    resp = supabase.table("scrape_tasks").select("*").eq("id", task_id).single().execute()
+    if not resp.data:
+        raise HTTPException(status_code=404, detail="task not found")
+    return resp.data
+
+
+@router.delete("/task/{task_id}")
+async def delete_scrape_task(task_id: str, current_user: dict = Depends(get_current_user)):
+    """Delete a scrape task and clean up Redis logs."""
+    try:
+        supabase = get_supabase_client()
+        
+        # Check if task exists and belongs to user's organization
+        resp = supabase.table("scrape_tasks").select("*").eq("id", task_id).single().execute()
+        if not resp.data:
+            raise HTTPException(status_code=404, detail="Task not found")
+        
+        organization_id = current_user.get("organization", {}).get("id")
+        if resp.data.get("organization_id") != organization_id:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this task")
+        
+        # Delete from database
+        supabase.table("scrape_tasks").delete().eq("id", task_id).execute()
+        
+        # Clean up Redis logs
+        try:
+            import redis
+            from app.config.settings import REDIS_URL
+            r = redis.from_url(REDIS_URL)
+            channel = f"scrape:{task_id}"
+            # Remove the log list
+            r.delete(f"{channel}:log")
+            logger.info(f"Cleaned up Redis logs for task {task_id}")
+        except Exception as redis_error:
+            logger.warning(f"Failed to clean up Redis logs: {redis_error}")
+        
+        return {"message": f"Task {task_id} deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete task")
+
+
+@router.get("/active-task")
+async def get_active_task(
+    receptionist_id: str = Query(None, description="Filter by receptionist"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Return the most recent task in queued/in_progress for org or receptionist."""
+    organization_id = current_user.get("organization", {}).get("id")
+    if not organization_id:
+        raise HTTPException(status_code=400, detail="User has no organization")
+
+    supabase = get_supabase_client()
+    q = (
+        supabase.table("scrape_tasks")
+        .select("*")
+        .eq("organization_id", organization_id)
+        .in_("status", ["queued", "in_progress"])
+        .order("created_at", desc=True)
+        .limit(1)
+    )
+    if receptionist_id:
+        q = q.eq("receptionist_id", receptionist_id)
+    resp = q.execute()
+    if resp.data:
+        return resp.data[0]
+    return {"status": "idle"}
 
 

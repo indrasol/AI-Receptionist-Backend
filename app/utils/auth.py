@@ -40,13 +40,8 @@ async def get_current_user(authorization: str = Depends(http_bearer)):
             
             # Get user's organization from metadata (pass claims for efficiency)
             user_org = await get_user_organization(user.get('claims').get('sub'), user.get('claims'))
-            
             if not user_org:
-                # Ensure user has CSA organization
-                org_id = await ensure_user_organization(user.get('claims').get('sub'))
-                if org_id:
-                    # Try again with updated metadata
-                    user_org = await get_user_organization(user.get('claims').get('sub'), user.get('claims'))
+                raise HTTPException(status_code=400, detail="User has no organization configured")
             
             # Add organization info to user claims
             if user_org:

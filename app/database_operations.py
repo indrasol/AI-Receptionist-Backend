@@ -246,18 +246,18 @@ async def get_user_organization_from_claims(user_claims: dict) -> Optional[Dict[
     try:
         # Check if organization info is already in JWT claims
         org_id = user_claims.get("organization_id")
-        org_name = user_claims.get("organization_name", "CSA")
-        
+        org_name = user_claims.get("organization_name")
         if org_id:
             # Get organization details from database
             supabase = get_supabase_client()
             org_result = supabase.table("organizations").select("*").eq("id", org_id).execute()
             
             if org_result.data:
-                logger.info(f"Found organization {org_name} for user from JWT claims")
+                db_name = org_result.data[0]["name"]
+                logger.info(f"Found organization {db_name} for user from JWT claims")
                 return {
                     "id": org_id,
-                    "name": org_name,
+                    "name": db_name,
                     "description": org_result.data[0].get("description", ""),
                     "role": "member"
                 }
@@ -282,48 +282,33 @@ async def get_user_organization(user_id: str, user_claims: dict = None) -> Optio
         Organization info or None if not found
     """
     try:
-        # First try to get organization from JWT claims if available (most efficient)
-        if user_claims:
-            org_from_claims = await get_user_organization_from_claims(user_claims)
-            if org_from_claims:
-                return org_from_claims
-        
-        # If no claims or no organization in claims, try admin lookup
-        if SUPABASE_SERVICE_ROLE_KEY:
-            try:
-                from app.database import get_supabase_admin_client
-                supabase_admin = get_supabase_admin_client()
-                
-                # Get user's organization from auth.users table
-                result = supabase_admin.auth.admin.get_user_by_id(user_id)
-                
-                if result.user and result.user.user_metadata:
-                    org_id = result.user.user_metadata.get("organization_id")
-                    org_name = result.user.user_metadata.get("organization_name", "CSA")
-                    
-                    if org_id:
-                        # Get organization details
-                        org_result = supabase_admin.table("organizations").select("*").eq("id", org_id).execute()
-                        if org_result.data:
-                            logger.info(f"Found organization {org_name} for user {user_id} via admin lookup")
-                            return {
-                                "id": org_id,
-                                "name": org_name,
-                                "description": org_result.data[0].get("description", ""),
-                                "role": "member"  # Default role for now
-                            }
-            except Exception as admin_error:
-                logger.warning(f"Admin lookup failed for user {user_id}: {str(admin_error)}")
-                # Continue with fallback approach
-        
-        # Final fallback: use default CSA organization
-        logger.info(f"Using default CSA organization for user: {user_id}")
-        return await get_default_organization()
-            
+        supabase = get_supabase_client()
+        query_col = "user_id" if "@" not in user_id else "email"
+        prof_resp = (
+            supabase.table("profiles")
+            .select("organization_id, organizations(name, description)")
+            .eq(query_col, user_id)
+            .single()
+            .execute()
+        )
+        logger.debug(f"Profile org lookup response: {prof_resp}")
+
+        if prof_resp.data and prof_resp.data.get("organization_id"):
+            org_id_row = prof_resp.data["organization_id"]
+            org_obj = prof_resp.data.get("organizations") or {}
+            return {
+                "id": org_id_row,
+                "name": org_obj.get("name", "Organization"),
+                "description": org_obj.get("description", ""),
+                "role": "member",
+            }
+
+        logger.warning(f"No organization linked to user {user_id} in profiles table")
+        return None
+
     except Exception as e:
         logger.error(f"Failed to get user organization: {str(e)}")
-        # Fallback to default organization
-        return await get_default_organization()
+        return None
 
 
 async def get_calls_by_user_organization(user_id: str, call_type: str = None, user_claims: dict = None) -> list:

@@ -2,6 +2,12 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
+class TextInputRequest(BaseModel):
+    text: str
+    name: str = "Text Content"
+    description: str = "Content extracted from text input"
+    receptionist_id: Optional[str] = None
+
 class DocumentProcessRequest(BaseModel):
     """Request schema for document processing"""
     pass  # File will be uploaded via multipart form
@@ -35,7 +41,6 @@ class DocumentChunkResponse(BaseModel):
     content: str
     bullets: List[str]
     sample_questions: List[str]
-    is_attached_to_assistant: bool = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     created_by_user_id: Optional[str] = None

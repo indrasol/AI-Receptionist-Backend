@@ -31,10 +31,12 @@ def load_env_file():
     return False
 
 # Load environment variables
-load_env_file()
+env_file_loaded = load_env_file()
 
 # Print environment for debugging
 print(f"Running in {ENV} environment")
+if not env_file_loaded:
+    print("No .env file found - using environment variables from Azure Key Vault")
 
 
 # Main
@@ -45,6 +47,12 @@ version=os.getenv("version_AIR", "1.0.0")
 SUPABASE_URL=os.getenv("AI_RECEPTION_SUPABASE_URL")
 SUPABASE_KEY=os.getenv("AI_RECEPTION_SUPABASE_KEY")
 SUPABASE_SERVICE_ROLE_KEY=os.getenv("AI_RECEPTION_SUPABASE_SERVICE_ROLE_KEY")
+
+# Environment-specific Supabase configurations for migrations
+SUPABASE_URL_DEV=os.getenv("SUPABASE_URL_DEV")
+SUPABASE_ANON_KEY_DEV=os.getenv("SUPABASE_ANON_KEY_DEV")
+SUPABASE_URL_PROD=os.getenv("SUPABASE_URL_PROD")
+SUPABASE_ANON_KEY_PROD=os.getenv("SUPABASE_ANON_KEY_PROD")
  
 SUPABASE_JWT_SECRET=os.getenv("AI_RECEPTION_SUPABASE_JWT_SECRET")
  
@@ -59,10 +67,31 @@ CSA_OPENAIIND=os.getenv('CSA_OPENAIIND')
 # Chunk generation limits
 MAX_TOTAL_CHUNKS_CHARACTERS = int(os.getenv('MAX_TOTAL_CHUNKS_CHARACTERS', '1000000'))  # 1M characters total
 MAX_CHUNK_CHARACTERS = int(os.getenv('MAX_CHUNK_CHARACTERS', '100000'))  # 100K characters per chunk
-MAX_CHUNKS_PER_URL = int(os.getenv('MAX_CHUNKS_PER_URL', '1'))  # 1 chunk per URL
+MAX_CHUNKS_PER_URL = int(os.getenv('MAX_CHUNKS_PER_URL', '10'))  # 1 chunk per URL
+
+# Asynchronous task queue (Celery)
+REDIS_URL=os.getenv('AI_RECEPTION_REDIS_URL', 'redis://localhost:6379/0')
 
 API_V1_STR=os.getenv('AI_RECEPTION_API_V1_STR', '/api/v1')
 HOST=os.getenv('AI_RECEPTION_HOST', '0.0.0.0')
 PORT=int(os.getenv('AI_RECEPTION_PORT', '8000'))
 LOG_LEVEL=os.getenv('AI_RECEPTION_LOG_LEVEL', 'INFO')
 DEBUG=os.getenv('AI_RECEPTION_DEBUG', 'true').lower() in ('true', '1', 'yes', 'on')
+
+# Email settings (used for scrape completion notice)
+EMAIL_HOST=os.getenv('EMAIL_HOST')
+EMAIL_PORT=int(os.getenv('EMAIL_PORT', '587')) if os.getenv('EMAIL_PORT') else None
+EMAIL_USERNAME=os.getenv('EMAIL_USERNAME')
+EMAIL_PASSWORD=os.getenv('EMAIL_PASSWORD')
+EMAIL_FROM=os.getenv('EMAIL_FROM')
+
+# SendGrid settings
+SENDGRID_API_KEY=os.getenv('SENDGRID_API_KEY')
+SENDGRID_FROM_EMAIL=os.getenv('SENDGRID_FROM_EMAIL', 'kanoj.gollamudi@indrasol.com')
+# Dynamic template IDs
+SENDGRID_TEMPLATE_SCRAPE_COMPLETE=os.getenv('SENDGRID_TEMPLATE_SCRAPE_COMPLETE', 'd-365c7c4b5a774fdbaf676e6941526b7a')
+
+# Brand defaults (used in emails; can be overridden per message)
+BRAND_NAME=os.getenv('BRAND_NAME', 'AI Receptionist')
+BRAND_LOGO_URL=os.getenv('BRAND_LOGO_URL', 'https://myaireceptionist.indrasol.com/lovable-uploads/ai_logo.png')
+BRAND_PRIMARY_COLOR=os.getenv('BRAND_PRIMARY_COLOR', '#2563eb')

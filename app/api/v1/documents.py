@@ -4,7 +4,7 @@ from typing import List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 
-from app.schemas.document import DocumentUploadResponse, DocumentInfo, DocumentChunkResponse
+from app.schemas.document import DocumentUploadResponse, DocumentInfo, DocumentChunkResponse, TextInputRequest
 from app.services.document_service import DocumentProcessingService
 from app.services.openai_service import OpenAIService
 from app.utils.auth import get_current_user
@@ -16,12 +16,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Pydantic model for text input
-class TextInputRequest(BaseModel):
-    text: str
-    name: str = "Text Content"
-    description: str = "Content extracted from text input"
-
 # Response model for text processing
 class TextProcessingResponse(BaseModel):
     message: str
@@ -32,6 +26,7 @@ class TextProcessingResponse(BaseModel):
 @router.post("/process-document", response_model=DocumentUploadResponse)
 async def process_document(
     file: UploadFile = File(..., description="Document file to process (PDF, DOCX, TXT, CSV)"),
+    receptionist_id: str = Form(None, description="Optional receptionist ID to associate chunks with"),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -61,7 +56,7 @@ async def process_document(
     try:
         # Extract user information from the dictionary
         user_email = current_user.get('email', 'unknown')
-        user_id = current_user.get('sub', 'unknown')
+        user_id = current_user.get('user_id', 'unknown')
         
         # Debug: Log the current_user structure
         logger.info(f"Current user structure: {current_user}")
@@ -74,7 +69,7 @@ async def process_document(
             logger.error(f"No organization_id found in user data: {current_user}")
             raise HTTPException(status_code=400, detail="User organization not found")
         
-        logger.info(f"Starting document processing for {file.filename} by user {user_email}")
+        logger.info(f"Starting document processing for {file.filename} by user {user_email} for receptionist {receptionist_id}")
         
         # Initialize services
         document_service = DocumentProcessingService()
@@ -96,27 +91,75 @@ async def process_document(
         }
         
         # Generate chunks using OpenAI
-        chunks = await openai_service.generate_chunks_from_scraped_data(
-            scraped_data=scraped_data,
-            organization_id=organization_id
-        )
+        try:
+            chunks = await openai_service.generate_chunks_from_scraped_data(
+                scraped_data=scraped_data,
+                organization_id=organization_id
+            )
+        except Exception as openai_error:
+            logger.error(f"OpenAI processing failed: {str(openai_error)}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Failed to process document content with AI: {str(openai_error)}"
+            )
         
         if not chunks:
-            raise HTTPException(status_code=500, detail="Failed to generate chunks from document")
+            raise HTTPException(status_code=500, detail="No chunks were generated from document")
         
         # Update chunks with document-specific information
         for chunk in chunks:
             chunk["source_type"] = "file"  # Use "file" instead of "document" to match schema
             chunk["source_id"] = document_result['filename']
-            chunk["created_by_user_id"] = user_id if user_id != "unknown" else None
+            chunk["created_by_user_id"] = None  # Skip user tracking for now due to foreign key constraint
+            chunk["receptionist_id"] = receptionist_id if receptionist_id else None
         
         # Save chunks to database
         try:
-            supabase.table("chunks").insert(chunks).execute()
+            result = supabase.table("chunks").insert(chunks).execute()
+            saved_chunks = result.data if result.data else []
             logger.info(f"Successfully saved {len(chunks)} chunks to database")
         except Exception as e:
             logger.error(f"Failed to save chunks to database: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Failed to save chunks to database: {str(e)}")
+        
+        # Upload chunks to VAPI as files and update vapi_file_id
+        from app.services.vapi_assistant import upload_chunk_to_vapi, sync_assistant_prompt
+        for saved_chunk in saved_chunks:
+            try:
+                chunk_id = saved_chunk.get('id')
+                chunk_name = saved_chunk.get('name', 'Unnamed Chunk')
+                chunk_content = saved_chunk.get('content', '')
+                bullets = saved_chunk.get('bullets', [])
+                sample_questions = saved_chunk.get('sample_questions', [])
+                
+                # Upload to VAPI with complete information
+                vapi_file_id = await upload_chunk_to_vapi(
+                    chunk_id, 
+                    chunk_name, 
+                    chunk_content,
+                    bullets=bullets,
+                    sample_questions=sample_questions
+                )
+                
+                # Update chunk with vapi_file_id
+                if vapi_file_id:
+                    supabase.table("chunks").update({"vapi_file_id": vapi_file_id}).eq("id", chunk_id).execute()
+                    logger.info(f"Updated chunk {chunk_id} with VAPI file ID: {vapi_file_id}")
+            except Exception as upload_error:
+                logger.warning(f"Failed to upload chunk {chunk_id} to VAPI: {str(upload_error)}")
+                # Continue with other chunks
+        
+        # Sync assistant with updated knowledge base file IDs
+        if receptionist_id:
+            try:
+                rec_row = supabase.table("receptionists").select("assistant_id").eq("id", receptionist_id).single().execute()
+                assistant_id = rec_row.data.get("assistant_id") if rec_row.data else None
+                if assistant_id:
+                    await sync_assistant_prompt(assistant_id, receptionist_id)
+                    logger.info(f"Successfully synced VAPI assistant {assistant_id} with new document knowledge")
+            except Exception as sync_error:
+                logger.warning(f"Failed to sync VAPI assistant: {str(sync_error)}")
+                # Don't fail the request if sync fails - chunks are already saved
         
         # Calculate processing time
         processing_time = time.time() - start_time
@@ -141,7 +184,6 @@ async def process_document(
                 content=chunk['content'],
                 bullets=chunk['bullets'],
                 sample_questions=chunk['sample_questions'],
-                is_attached_to_assistant=chunk['is_attached_to_assistant'],
                 created_at=chunk.get('created_at'),
                 updated_at=chunk.get('updated_at'),
                 created_by_user_id=chunk['created_by_user_id']
@@ -240,7 +282,8 @@ async def get_supported_formats():
         for chunk in chunks:
             chunk["source_type"] = "document"
             chunk["source_id"] = document_result['filename']
-            chunk["created_by_user_id"] = "test-user-id"
+            chunk["created_by_user_id"] = None  # Skip user tracking for now due to foreign key constraint
+            chunk["receptionist_id"] = None # pass through later
         
         # Calculate processing time
         processing_time = time.time() - start_time
@@ -265,7 +308,6 @@ async def get_supported_formats():
                 content=chunk['content'],
                 bullets=chunk['bullets'],
                 sample_questions=chunk['sample_questions'],
-                is_attached_to_assistant=chunk['is_attached_to_assistant'],
                 created_at=chunk.get('created_at'),
                 updated_at=chunk.get('updated_at'),
                 created_by_user_id=chunk['created_by_user_id']
@@ -316,7 +358,7 @@ async def process_text(
     try:
         # Extract user information from the dictionary
         user_email = current_user.get('email', 'unknown')
-        user_id = current_user.get('sub', 'unknown')
+        user_id = current_user.get('user_id', 'unknown')
         
         # Extract organization_id using the same pattern as other endpoints
         organization_id = current_user.get("organization", {}).get("id")
@@ -371,16 +413,58 @@ async def process_text(
         for chunk in chunks:
             chunk["source_type"] = "text"  # Use "text" for direct text input
             chunk["source_id"] = f"text://{request.name}"
-            chunk["created_by_user_id"] = user_id if user_id != "unknown" else None
+            chunk["created_by_user_id"] = None  # Skip user tracking for now due to foreign key constraint
+            chunk["receptionist_id"] = request.receptionist_id if hasattr(request, "receptionist_id") else None
         
         # Save chunks to database
         try:
             supabase = get_supabase_client()
-            supabase.table("chunks").insert(chunks).execute()
+            result = supabase.table("chunks").insert(chunks).execute()
+            saved_chunks = result.data if result.data else []
             logger.info(f"Successfully saved {len(chunks)} chunks to database")
         except Exception as e:
             logger.error(f"Failed to save chunks to database: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Failed to save chunks to database: {str(e)}")
+        
+        # Upload chunks to VAPI as files and update vapi_file_id
+        from app.services.vapi_assistant import upload_chunk_to_vapi, sync_assistant_prompt
+        for saved_chunk in saved_chunks:
+            try:
+                chunk_id = saved_chunk.get('id')
+                chunk_name = saved_chunk.get('name', 'Unnamed Chunk')
+                chunk_content = saved_chunk.get('content', '')
+                bullets = saved_chunk.get('bullets', [])
+                sample_questions = saved_chunk.get('sample_questions', [])
+                
+                # Upload to VAPI with complete information
+                vapi_file_id = await upload_chunk_to_vapi(
+                    chunk_id, 
+                    chunk_name, 
+                    chunk_content,
+                    bullets=bullets,
+                    sample_questions=sample_questions
+                )
+                
+                # Update chunk with vapi_file_id
+                if vapi_file_id:
+                    supabase.table("chunks").update({"vapi_file_id": vapi_file_id}).eq("id", chunk_id).execute()
+                    logger.info(f"Updated chunk {chunk_id} with VAPI file ID: {vapi_file_id}")
+            except Exception as upload_error:
+                logger.warning(f"Failed to upload chunk {chunk_id} to VAPI: {str(upload_error)}")
+                # Continue with other chunks
+        
+        # Sync assistant with updated knowledge base file IDs
+        receptionist_id = request.receptionist_id if hasattr(request, "receptionist_id") else None
+        if receptionist_id:
+            try:
+                rec_row = supabase.table("receptionists").select("assistant_id").eq("id", receptionist_id).single().execute()
+                assistant_id = rec_row.data.get("assistant_id") if rec_row.data else None
+                if assistant_id:
+                    await sync_assistant_prompt(assistant_id, receptionist_id)
+                    logger.info(f"Successfully synced VAPI assistant {assistant_id} with new text knowledge")
+            except Exception as sync_error:
+                logger.warning(f"Failed to sync VAPI assistant: {str(sync_error)}")
+                # Don't fail the request if sync fails - chunks are already saved
         
         # Calculate processing time
         processing_time = time.time() - start_time
@@ -399,6 +483,127 @@ async def process_text(
         raise
     except Exception as e:
         logger.error(f"Error in text processing for '{request.name}': {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process text: {str(e)}"
+        )
+
+@router.post("/process-text-simple", response_model=TextProcessingResponse)
+async def process_text_simple(
+    request: TextInputRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Process text input and store it directly without AI processing.
+    
+    This is a simpler, faster alternative that just stores the text as-is
+    without generating structured chunks or sample questions.
+    
+    Args:
+        request: TextInputRequest containing the text, name, and description
+        current_user: Authenticated user information
+        
+    Returns:
+        TextProcessingResponse with simple chunk
+    """
+    start_time = time.time()
+    
+    try:
+        # Extract user information from the dictionary
+        user_email = current_user.get('email', 'unknown')
+        user_id = current_user.get('user_id', 'unknown')
+        
+        # Extract organization_id using the same pattern as other endpoints
+        organization_id = current_user.get("organization", {}).get("id")
+        logger.info(f"Organization ID from organization.id: {organization_id}")
+        
+        if not organization_id:
+            logger.error(f"No organization_id found in user data: {current_user}")
+            raise HTTPException(status_code=400, detail="User organization not found")
+        
+        logger.info(f"Starting simple text processing for '{request.name}' by user {user_email}")
+        
+        # Create a simple chunk directly from the input
+        chunk = {
+            "organization_id": organization_id,
+            "source_type": "text",
+            "source_id": f"text://{request.name}",
+            "name": request.name,
+            "description": request.description,
+            "content": request.text,
+            "bullets": [],  # No AI-generated bullets
+            "sample_questions": [],  # No AI-generated questions
+            "created_by_user_id": None,  # Skip user tracking for now due to foreign key constraint
+            "receptionist_id": request.receptionist_id if hasattr(request, "receptionist_id") else None
+        }
+        
+        # Save chunk to database
+        try:
+            supabase = get_supabase_client()
+            result = supabase.table("chunks").insert([chunk]).execute()
+            saved_chunks = result.data if result.data else []
+            logger.info(f"Successfully saved simple text chunk to database")
+        except Exception as e:
+            logger.error(f"Failed to save chunk to database: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to save chunk to database: {str(e)}")
+        
+        # Upload chunk to VAPI as file and update vapi_file_id
+        from app.services.vapi_assistant import upload_chunk_to_vapi, sync_assistant_prompt
+        for saved_chunk in saved_chunks:
+            try:
+                chunk_id = saved_chunk.get('id')
+                chunk_name = saved_chunk.get('name', 'Unnamed Chunk')
+                chunk_content = saved_chunk.get('content', '')
+                bullets = saved_chunk.get('bullets', [])
+                sample_questions = saved_chunk.get('sample_questions', [])
+                
+                # Upload to VAPI with complete information
+                vapi_file_id = await upload_chunk_to_vapi(
+                    chunk_id, 
+                    chunk_name, 
+                    chunk_content,
+                    bullets=bullets,
+                    sample_questions=sample_questions
+                )
+                
+                # Update chunk with vapi_file_id
+                if vapi_file_id:
+                    supabase.table("chunks").update({"vapi_file_id": vapi_file_id}).eq("id", chunk_id).execute()
+                    logger.info(f"Updated chunk {chunk_id} with VAPI file ID: {vapi_file_id}")
+            except Exception as upload_error:
+                logger.warning(f"Failed to upload chunk {chunk_id} to VAPI: {str(upload_error)}")
+                # Continue with other chunks
+        
+        # Sync assistant with updated knowledge base file IDs
+        receptionist_id = request.receptionist_id if hasattr(request, "receptionist_id") else None
+        if receptionist_id:
+            try:
+                rec_row = supabase.table("receptionists").select("assistant_id").eq("id", receptionist_id).single().execute()
+                assistant_id = rec_row.data.get("assistant_id") if rec_row.data else None
+                if assistant_id:
+                    await sync_assistant_prompt(assistant_id, receptionist_id)
+                    logger.info(f"Successfully synced VAPI assistant {assistant_id} with new simple text knowledge")
+            except Exception as sync_error:
+                logger.warning(f"Failed to sync VAPI assistant: {str(sync_error)}")
+                # Don't fail the request if sync fails - chunks are already saved
+        
+        # Calculate processing time
+        processing_time = time.time() - start_time
+        
+        response = TextProcessingResponse(
+            message=f"Successfully processed text and created 1 chunk",
+            chunks_generated=1,
+            chunks=[chunk],
+            processing_time_seconds=round(processing_time, 2)
+        )
+        
+        logger.info(f"Simple text processing completed for '{request.name}' in {processing_time:.2f} seconds")
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in simple text processing for '{request.name}': {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to process text: {str(e)}"

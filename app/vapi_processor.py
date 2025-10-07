@@ -118,7 +118,8 @@ async def update_inbound_calls_database(inbound_calls: List[Dict[str, Any]], org
                     "updated_at": call.get("updatedAt", datetime.utcnow().isoformat()),
                     "created_at": call.get("createdAt", datetime.utcnow().isoformat()),
                     "first_name": customer.get("firstName", ""),
-                    "last_name": customer.get("lastName", "")
+                    "last_name": customer.get("lastName", ""),
+                    "assistant_id": call.get("assistantId")
                 }
                 
 
@@ -225,8 +226,11 @@ async def update_outbound_calls_database(outbound_calls: List[Dict[str, Any]], o
                 if existing_call.data:
                     # Update existing call - only update fields that exist in the table
                     existing_record_id = existing_call.data[0]["id"]
+                    assistant_id = call.get("assistantId")
+
                     update_fields = {
                         "organization_id": organization_id,
+                        "assistant_id": assistant_id,
                         "first_name": first_name,
                         "last_name": last_name,
                         "phone_number": customer_number,

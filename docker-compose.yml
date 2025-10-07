@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - ENV=production
+      - AI_RECEPTION_REDIS_URL=redis://localhost:6379/0
+      - AI_RECEPTION_SUPABASE_URL=${AI_RECEPTION_SUPABASE_URL}
+      - AI_RECEPTION_SUPABASE_KEY=${AI_RECEPTION_SUPABASE_KEY}
+      - AI_RECEPTION_SUPABASE_SERVICE_ROLE_KEY=${AI_RECEPTION_SUPABASE_SERVICE_ROLE_KEY}
+    volumes:
+      - ./logs:/var/log

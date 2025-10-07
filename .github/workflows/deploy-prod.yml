@@ -51,9 +51,11 @@ jobs:
           if [ "${GITHUB_REF_NAME}" = "main" ]; then
             echo "SLOT=" >> $GITHUB_OUTPUT
             echo "TAG=prod-${GITHUB_SHA}" >> $GITHUB_OUTPUT
+            echo "ENV=production" >> $GITHUB_OUTPUT
           else
             echo "SLOT=dev" >> $GITHUB_OUTPUT
             echo "TAG=dev-${GITHUB_SHA}" >> $GITHUB_OUTPUT
+            echo "ENV=development" >> $GITHUB_OUTPUT
           fi
 
       # 5) Build+push multi-arch (we only target amd64 here)
@@ -65,9 +67,12 @@ jobs:
             --push \
             --tag $LOGIN_SERVER/${{ env.IMAGE_NAME }}:${{ steps.decide.outputs.TAG }} \
             --file Dockerfile \
+            --build-arg ENV=${{ steps.decide.outputs.ENV }} \
             .
 
-      # 6) Deploy the new image to Azure Web App
+    # (Python migration runner removed)
+
+      # 9) Deploy the new image to Azure Web App
       - name: "Deploy to Azure Web App / slot"
         uses: azure/webapps-deploy@v3
         with:
