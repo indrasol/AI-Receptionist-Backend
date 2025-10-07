@@ -36,7 +36,7 @@ def scrape_website(self, task_id: str, url: str, receptionist_id: str | None, or
             # also persist so UI can catch up after refresh
             r.rpush(f"{channel}:log", event)
 
-        publish(f"Starting scrape of {url}")
+        publish(f"Beginning content collection from {url}")
         # Scrape
         import asyncio
         async def run_scrape():
@@ -48,7 +48,7 @@ def scrape_website(self, task_id: str, url: str, receptionist_id: str | None, or
                     include_subpages=include_subpages,
                 )
         scraped_content.extend(asyncio.run(run_scrape()))
-        publish("Scraping done, generating chunks…")
+        publish("Content collection finished, preparing knowledge files…")
 
         # Generate chunks
         openai_service = OpenAIService()
@@ -64,7 +64,7 @@ def scrape_website(self, task_id: str, url: str, receptionist_id: str | None, or
             res = supabase.table("chunks").insert(chunks).execute()
             saved_chunks = res.data or []
 
-        publish(f"Uploading {len(saved_chunks)} chunks to VAPI …")
+        publish(f"Uploading {len(saved_chunks)} knowledge files …")
         for saved_chunk in saved_chunks:
             try:
                 cid = saved_chunk["id"]
@@ -86,7 +86,7 @@ def scrape_website(self, task_id: str, url: str, receptionist_id: str | None, or
             if assistant_id:
                 asyncio.run(sync_assistant_prompt(assistant_id, receptionist_id))
 
-        publish("Scrape finished successfully")
+        publish("Content collection finished successfully")
 
         # Send completion email via SendGrid template if configured
         try:

@@ -17,6 +17,20 @@ The application uses a **startup script** to manage all services in a single con
 - **Celery Worker** - Background task processor (background process)
 - **FastAPI Server** - Main API server (foreground process)
 
+## Redis Access (Development/Debugging)
+
+Redis runs on port 6379 inside the container and is exposed for RedisInsight access.
+
+**⚠️ Security Note**: This is for development/debugging only. In production, consider:
+- Using Azure Redis Cache instead
+- Implementing an admin API endpoint for log viewing
+- Restricting Redis access to specific IPs
+
+### Connecting RedisInsight
+- **Local Development**: `redis://localhost:6379/0`
+- **Azure App Service**: `redis://<your-app-name>.azurewebsites.net:6379/0`
+- **Pattern to search**: `scrape:*:log` for scraping task logs
+
 ## 📋 Deployment Steps
 
 ### 1. Environment Configuration
