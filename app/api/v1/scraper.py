@@ -43,7 +43,7 @@ async def scrape_url(
         inserted = supabase.table("scrape_tasks").insert(task_row).execute()
         task_id = inserted.data[0]["id"]
 
-        # Enqueue Celery task
+        # Enqueue Celery task (include notify_email from current user)
         from app.tasks.scrape_tasks import scrape_website
         scrape_website.delay(
             task_id=task_id,
@@ -53,6 +53,7 @@ async def scrape_url(
             max_depth=request.max_depth or 3,
             include_subdomains=request.include_subdomains if request.include_subdomains is not None else True,
             include_subpages=request.include_subpages if request.include_subpages is not None else True,
+            notify_email=current_user.get("email"),
         )
 
         return {"task_id": task_id, "status": "queued"}
