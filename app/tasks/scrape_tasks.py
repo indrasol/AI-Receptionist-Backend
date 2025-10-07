@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 @celery_app.task(bind=True, name="app.tasks.scrape_tasks.scrape_website", autoretry_for=(Exception,), retry_backoff=True, max_retries=3)
 def scrape_website(self, task_id: str, url: str, receptionist_id: str | None, organization_id: str, max_depth: int = 3,
-                   include_subdomains: bool = True, include_subpages: bool = True) -> dict:
+                   include_subdomains: bool = True, include_subpages: bool = True, notify_email: str | None = None, **_kwargs) -> dict:
     """Background Celery task that performs full scrape + chunk pipeline."""
 
     start_ts = datetime.utcnow().isoformat()
@@ -88,17 +88,33 @@ def scrape_website(self, task_id: str, url: str, receptionist_id: str | None, or
 
         publish("Scrape finished successfully")
 
-        # Send completion email
+        # Send completion email via SendGrid template if configured
         try:
-            from app.utils.email_utils import send_email_async
-            # lookup user email owning task
-            creator_resp = supabase.table("users").select("email").eq("id", self.request.get("args")[0] if False else "").execute()
-        except Exception:
-            pass  # placeholder
+            if notify_email:
+                context = {
+                    "url": url,
+                    "total_chunks": len(saved_chunks),
+                    "task_id": task_id,
+                    "status": "completed",
+                }
+                import asyncio as _asyncio
+                from app.utils.email_sendgrid import send_scrape_complete_email
+                _asyncio.run(send_scrape_complete_email(notify_email, context))
+        except Exception as mail_exc:
+            logger.warning(f"Failed to send completion email: {mail_exc}")
 
         supabase.table("scrape_tasks").update({"status": "completed", "completed_at": datetime.utcnow().isoformat()}).eq("id", task_id).execute()
         return {"chunks": len(saved_chunks)}
     except Exception as exc:
         logger.exception("Scrape failed")
         supabase.table("scrape_tasks").update({"status": "failed", "error": str(exc)}).eq("id", task_id).execute()
+        # Attempt failure email as well
+        try:
+            if 'notify_email' in locals() and notify_email:
+                import asyncio as _asyncio
+                from app.utils.email_sendgrid import send_scrape_complete_email
+                context = {"url": url, "task_id": task_id, "status": "failed", "error": str(exc)}
+                _asyncio.run(send_scrape_complete_email(notify_email, context))
+        except Exception:
+            pass
         raise

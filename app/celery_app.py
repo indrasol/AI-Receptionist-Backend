@@ -20,6 +20,9 @@ celery_app.conf.update(
     },
     worker_send_task_events=True,
     task_send_sent_event=True,
+    # Fix for Celery 6.0+ compatibility
+    broker_connection_retry_on_startup=True,
+    broker_connection_retry=True,
 )
 
 # Ensure all task modules inside app.tasks are imported so workers register them

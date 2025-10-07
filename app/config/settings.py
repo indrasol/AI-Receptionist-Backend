@@ -84,3 +84,14 @@ EMAIL_PORT=int(os.getenv('EMAIL_PORT', '587')) if os.getenv('EMAIL_PORT') else N
 EMAIL_USERNAME=os.getenv('EMAIL_USERNAME')
 EMAIL_PASSWORD=os.getenv('EMAIL_PASSWORD')
 EMAIL_FROM=os.getenv('EMAIL_FROM')
+
+# SendGrid settings
+SENDGRID_API_KEY=os.getenv('SENDGRID_API_KEY')
+SENDGRID_FROM_EMAIL=os.getenv('SENDGRID_FROM_EMAIL', 'kanoj.gollamudi@indrasol.com')
+# Dynamic template IDs
+SENDGRID_TEMPLATE_SCRAPE_COMPLETE=os.getenv('SENDGRID_TEMPLATE_SCRAPE_COMPLETE', 'd-365c7c4b5a774fdbaf676e6941526b7a')
+
+# Brand defaults (used in emails; can be overridden per message)
+BRAND_NAME=os.getenv('BRAND_NAME', 'AI Receptionist')
+BRAND_LOGO_URL=os.getenv('BRAND_LOGO_URL', 'https://myaireceptionist.indrasol.com/lovable-uploads/ai_logo.png')
+BRAND_PRIMARY_COLOR=os.getenv('BRAND_PRIMARY_COLOR', '#2563eb')
