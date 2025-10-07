@@ -9,9 +9,9 @@ redis-server --port 6379 --bind 0.0.0.0 --daemonize yes --save "" --appendonly n
 # Wait for Redis to start
 sleep 2
 
-# Start Celery worker in background with non-root user
+# Start Celery worker in background
 cd /src
-celery -A app.celery_app worker --loglevel=info --concurrency=2 --uid=1000 --gid=1000 &
+celery -A app.celery_app worker --loglevel=info --concurrency=2 &
 CELERY_PID=$!
 
 # Start FastAPI server (this will be the main process)
