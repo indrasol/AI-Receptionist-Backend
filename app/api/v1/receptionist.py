@@ -11,10 +11,136 @@ import os
 import httpx
 from app.services.vapi_assistant import build_assistant_payload
 import asyncio
+import re
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+def get_country_from_phone_number(phone_number: str) -> str:
+    """
+    Determine country from phone number based on country code.
+    
+    Args:
+        phone_number: Phone number in international format (e.g., +14242919395)
+        
+    Returns:
+        Country name or "Unknown" if not found
+    """
+    # Remove any spaces, dashes, or parentheses
+    cleaned_number = re.sub(r'[\s\-\(\)]', '', phone_number)
+    
+    # Country code mappings (most common ones)
+    country_codes = {
+        '+1': 'United States',
+        '+44': 'United Kingdom',
+        '+49': 'Germany',
+        '+33': 'France',
+        '+39': 'Italy',
+        '+34': 'Spain',
+        '+31': 'Netherlands',
+        '+41': 'Switzerland',
+        '+43': 'Austria',
+        '+32': 'Belgium',
+        '+45': 'Denmark',
+        '+46': 'Sweden',
+        '+47': 'Norway',
+        '+358': 'Finland',
+        '+354': 'Iceland',
+        '+353': 'Ireland',
+        '+351': 'Portugal',
+        '+30': 'Greece',
+        '+48': 'Poland',
+        '+420': 'Czech Republic',
+        '+421': 'Slovakia',
+        '+36': 'Hungary',
+        '+385': 'Croatia',
+        '+386': 'Slovenia',
+        '+372': 'Estonia',
+        '+371': 'Latvia',
+        '+370': 'Lithuania',
+        '+81': 'Japan',
+        '+82': 'South Korea',
+        '+86': 'China',
+        '+852': 'Hong Kong',
+        '+853': 'Macau',
+        '+886': 'Taiwan',
+        '+65': 'Singapore',
+        '+60': 'Malaysia',
+        '+66': 'Thailand',
+        '+84': 'Vietnam',
+        '+63': 'Philippines',
+        '+62': 'Indonesia',
+        '+91': 'India',
+        '+92': 'Pakistan',
+        '+880': 'Bangladesh',
+        '+94': 'Sri Lanka',
+        '+977': 'Nepal',
+        '+975': 'Bhutan',
+        '+960': 'Maldives',
+        '+7': 'Russia',
+        '+7': 'Kazakhstan',  # Same code as Russia
+        '+380': 'Ukraine',
+        '+375': 'Belarus',
+        '+374': 'Armenia',
+        '+995': 'Georgia',
+        '+994': 'Azerbaijan',
+        '+998': 'Uzbekistan',
+        '+996': 'Kyrgyzstan',
+        '+992': 'Tajikistan',
+        '+993': 'Turkmenistan',
+        '+61': 'Australia',
+        '+64': 'New Zealand',
+        '+27': 'South Africa',
+        '+20': 'Egypt',
+        '+234': 'Nigeria',
+        '+254': 'Kenya',
+        '+233': 'Ghana',
+        '+212': 'Morocco',
+        '+213': 'Algeria',
+        '+216': 'Tunisia',
+        '+218': 'Libya',
+        '+20': 'Egypt',
+        '+966': 'Saudi Arabia',
+        '+971': 'UAE',
+        '+974': 'Qatar',
+        '+965': 'Kuwait',
+        '+973': 'Bahrain',
+        '+968': 'Oman',
+        '+964': 'Iraq',
+        '+98': 'Iran',
+        '+90': 'Turkey',
+        '+972': 'Israel',
+        '+962': 'Jordan',
+        '+961': 'Lebanon',
+        '+963': 'Syria',
+        '+20': 'Egypt',
+        '+52': 'Mexico',
+        '+55': 'Brazil',
+        '+54': 'Argentina',
+        '+56': 'Chile',
+        '+57': 'Colombia',
+        '+58': 'Venezuela',
+        '+51': 'Peru',
+        '+593': 'Ecuador',
+        '+591': 'Bolivia',
+        '+595': 'Paraguay',
+        '+598': 'Uruguay',
+        '+506': 'Costa Rica',
+        '+507': 'Panama',
+        '+502': 'Guatemala',
+        '+504': 'Honduras',
+        '+503': 'El Salvador',
+        '+505': 'Nicaragua',
+        '+53': 'Cuba',
+    }
+    
+    # Check for country codes (longest first to avoid partial matches)
+    for code in sorted(country_codes.keys(), key=len, reverse=True):
+        if cleaned_number.startswith(code):
+            return country_codes[code]
+    
+    return "Unknown"
 
 # Pydantic models for VAPI phone sync
 class VapiPhoneSyncResponse(BaseModel):
@@ -174,21 +300,30 @@ async def get_assistants(current_user: dict = Depends(get_current_user)):
 @router.get("/get_available_phoneNumber", response_model=VapiPhoneNumbersResponse)
 async def get_available_phone_number(current_user: dict = Depends(get_current_user)):
     """
-    Get list of available phone numbers that are not assigned to any assistant or workflow
+    Get list of available phone numbers that are not assigned to any assistant or workflow.
+    
+    **Auto-Sync**: This endpoint automatically syncs phone numbers from VAPI first to ensure
+    the latest status (assigned/unassigned) is reflected in the database.
     
     **Authentication Required**: Include `Authorization: Bearer <token>` header
     
     **Returns:**
     - List of unassigned phone numbers that can be used for new assistants/workflows
     - Only returns numbers where assistant_id AND workflow_id are NULL
+    - Always reflects the current state from VAPI API
+    
+    **Process:**
+    1. Sync phone numbers from VAPI API to database
+    2. Query database for unassigned numbers
+    3. Return updated list to UI
     
     **Raises:**
-    - 400: If user has no organization
-    - 500: If database query fails
+    - 400: If user has no organization or VAPI client not configured
+    - 500: If VAPI sync or database query fails
 
     Example Response:
     {
-        "message": "Successfully fetched 3 available phone numbers",
+        "message": "Successfully synced and fetched 3 available phone numbers",
         "phone_numbers": [
             {
                 "id": "ca76d992-58d8-4812-b43b-873fabf9a10c",
@@ -213,7 +348,26 @@ async def get_available_phone_number(current_user: dict = Depends(get_current_us
         if not organization_id:
             raise HTTPException(status_code=400, detail="User has no organization")
         
-        # Get Supabase client
+        # Step 1: Sync phone numbers from VAPI first to get latest status
+        logger.info(f"Syncing phone numbers from VAPI for organization {organization_id}")
+        
+        try:
+            sync_service = VapiPhoneSyncService()
+            
+            # Fetch latest phone numbers from VAPI
+            vapi_phone_numbers = await sync_service.fetch_phone_numbers_from_vapi()
+            logger.info(f"Fetched {len(vapi_phone_numbers)} phone numbers from VAPI")
+            
+            # Sync to database (this updates existing records with latest status)
+            user_id = current_user.get("user_id", "system")
+            sync_result = await sync_service.sync_phone_numbers(vapi_phone_numbers, user_id, organization_id)
+            logger.info(f"Sync result: {sync_result['inserted']} inserted, {sync_result['updated']} updated, {sync_result['skipped']} skipped")
+            
+        except Exception as sync_error:
+            logger.warning(f"Failed to sync from VAPI, using cached data: {str(sync_error)}")
+            # Continue with cached data if sync fails
+        
+        # Step 2: Query database for available (unassigned) phone numbers
         supabase = get_supabase_client()
         
         # Query phone numbers from database - only return numbers not assigned to assistant or workflow
@@ -230,10 +384,14 @@ async def get_available_phone_number(current_user: dict = Depends(get_current_us
         # Convert database records to API format
         phone_numbers = []
         for record in response.data:
+            # Determine country from phone number
+            country = get_country_from_phone_number(record["number"])
+            
             phone_number = {
                 "id": record["vapi_id"],
                 "number": record["number"],
                 "provider": record["provider"],
+                "country": country,
                 "status": record["status"],
                 "name": record.get("name"),
                 "assistant_id": record.get("assistant_id"),
@@ -245,10 +403,10 @@ async def get_available_phone_number(current_user: dict = Depends(get_current_us
             }
             phone_numbers.append(phone_number)
         
-        logger.info(f"Successfully fetched {len(phone_numbers)} phone numbers for organization {organization_id}")
+        logger.info(f"Successfully fetched {len(phone_numbers)} available phone numbers for organization {organization_id}")
         
         return VapiPhoneNumbersResponse(
-            message=f"Successfully fetched {len(phone_numbers)} available phone numbers",
+            message=f"Successfully fetched {len(phone_numbers)} available phone numbers (synced from VAPI)",
             phone_numbers=phone_numbers,
             total_count=len(phone_numbers)
         )
@@ -256,8 +414,8 @@ async def get_available_phone_number(current_user: dict = Depends(get_current_us
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error fetching phone numbers: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch phone numbers: {str(e)}")
+        logger.error(f"Unexpected error syncing and fetching phone numbers: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to sync and fetch phone numbers: {str(e)}")
 
 
 @router.post("/sync_vapi_phone_numbers", response_model=VapiPhoneSyncResponse)
